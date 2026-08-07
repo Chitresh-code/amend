@@ -1,5 +1,5 @@
-# No Postgres/Neo4j service containers yet: there is no integration-test code
-# exercising them. Add them here when that lands.
+# No Neo4j service container yet: no code exercises it. Add it here when
+# that lands.
 #
 # The "test" job runs unconditionally (no path filtering) even though this is
 # a monorepo with api/ and web/: main's branch protection requires it on
@@ -23,6 +23,41 @@ jobs:
     defaults:
       run:
         working-directory: api
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: amend_test
+          POSTGRES_USER: amend
+          POSTGRES_PASSWORD: amend_test_pw
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U amend -d amend_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 56379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 55432
+      POSTGRES_DB: amend_test
+      POSTGRES_USER: amend
+      POSTGRES_PASSWORD: amend_test_pw
+      REDIS_URL: redis://localhost:56379/0
+      NEO4J_USER: test
+      NEO4J_PASSWORD: test
+      CREDENTIAL_ENCRYPTION_KEY: vv6HWttTtvs2bfSm_H_Gzh1ACRme1jRUr-wtUldclSs=
+      API_KEY_HASH_PEPPER: ci-api-key-pepper
+      SESSION_TOKEN_PEPPER: ci-session-pepper
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -43,6 +78,9 @@ jobs:
 
       - name: Type check (mypy)
         run: uv run mypy app
+
+      - name: Apply migrations
+        run: uv run python scripts/migrate.py
 
       - name: Test (pytest)
         run: uv run pytest

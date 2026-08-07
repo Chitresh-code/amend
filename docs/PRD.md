@@ -2305,15 +2305,19 @@ Request:
 ```json
 {
   "provider": "anthropic",
+  "model_id": "claude-sonnet-4-5",
   "api_key": "sk-ant-..."
 }
 ```
+
+`model_id` must be one of the provider's known model IDs (`GET /v1/models`). A credential is scoped to `(user_id, provider)`, not `(user_id, provider, model_id)` (§1.5's `UNIQUE (user_id, provider)`): submitting a new `model_id` for a provider that already has a credential updates that credential's `model_id` and key rather than creating a second row, since a caller has exactly one stored key per provider.
 
 Response (the key is never echoed back):
 
 ```json
 {
   "provider": "anthropic",
+  "model_id": "claude-sonnet-4-5",
   "configured": true,
   "key_suffix": "...wxyz",
   "created_at": "2026-08-07T00:00:00Z"

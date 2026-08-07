@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Landing } from './routes/Landing';
 import { Login } from './routes/Login';
+import { CredentialSetup } from './routes/CredentialSetup';
 import { Settings } from './routes/Settings';
 import { Chat } from './routes/Chat';
 import { RequireAuth, RequireGuest } from './lib/auth';
@@ -16,6 +17,14 @@ export function App() {
             <RequireGuest>
               <Login />
             </RequireGuest>
+          }
+        />
+        <Route
+          path="/login/setup"
+          element={
+            <RequireAuth>
+              <CredentialSetup />
+            </RequireAuth>
           }
         />
         <Route
