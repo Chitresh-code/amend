@@ -1,0 +1,59 @@
+[project]
+name = "amend"
+version = "0.1.0"
+description = "Graph-grounded regulatory research system for public RBI and SEBI publications"
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "redis>=8.1.0",
+    "cryptography>=50.0.0",
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.1",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "strands-agents>=1.50.2",
+    "neo4j>=6.2.0",
+    "psycopg[binary]>=3.3.4",
+    "pgvector>=0.5.0",
+]
+
+[project.optional-dependencies]
+# Strands Agents model provider extras (strands-agents[<extra>]).
+# Bedrock ships in the base strands-agents dependency; there is no separate
+# "bedrock" extra. Enable only the extras this deployment actually needs.
+anthropic = ["strands-agents[anthropic]"]
+openai = ["strands-agents[openai]"]
+gemini = ["strands-agents[gemini]"]
+ollama = ["strands-agents[ollama]"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# docs/ contains illustrative code fences (not real source); ruff's markdown
+# formatting would fight their intentional inline comment alignment.
+extend-exclude = ["docs/"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+add-bounds = "lower"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.1",
+]
