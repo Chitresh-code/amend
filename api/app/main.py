@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.auth import router as auth_router
+from app.api.routes.conversations import router as conversations_router
 from app.api.routes.credentials import router as credentials_router
 from app.config import settings
 from app.db import close_pool, open_pool
@@ -32,6 +33,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(credentials_router)
+app.include_router(conversations_router)
 
 
 @app.get("/health")

@@ -30,7 +30,8 @@ def db_conn():
 @pytest.fixture(autouse=True)
 def clean_state(db_conn):
     db_conn.execute(
-        "TRUNCATE TABLE model_credentials, api_keys, user_sessions, users RESTART IDENTITY CASCADE"
+        "TRUNCATE TABLE conversations, model_credentials, api_keys, user_sessions, users "
+        "RESTART IDENTITY CASCADE"
     )
     sync_redis.from_url(settings.redis_url).flushdb()
     yield
@@ -51,6 +52,20 @@ def seed_user(db_conn):
             "INSERT INTO users (email, password_hash, organization) VALUES (%s, %s, %s) "
             "RETURNING id",
             (email, hash_password(password), "Example Bank"),
+        ).fetchone()
+        assert row is not None
+        return str(row[0])
+
+    return _seed
+
+
+@pytest.fixture
+def seed_conversation(db_conn):
+    def _seed(user_id: str, title: str = "Test conversation", pinned: bool = False) -> str:
+        row = db_conn.execute(
+            "INSERT INTO conversations (user_id, title, pinned) VALUES (%s, %s, %s) "
+            "RETURNING conversation_id",
+            (user_id, title, pinned),
         ).fetchone()
         assert row is not None
         return str(row[0])
