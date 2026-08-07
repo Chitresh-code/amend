@@ -1056,12 +1056,14 @@ Suggested citation object:
   "publication_date": "YYYY-MM-DD",
   "clause_id": "clause_x",
   "clause_number": "4.2",
+  "clause_text": "Full text of the cited clause, quoted verbatim.",
+  "status": "active",
   "page": 7,
   "source_url": "official-public-source"
 }
 ```
 
-The frontend may display a shortened citation while preserving the full object internally.
+`status` is `active` or `superseded` (§23); a citation to a superseded clause is only returned alongside the provision that superseded it, never on its own (§32). `clause_text` is the quoted source text, not a paraphrase, so a caller can verify the citation without a second lookup. The frontend may display a shortened citation while preserving the full object internally.
 
 ---
 
@@ -1229,13 +1231,28 @@ Returns structured document metadata and clause hierarchy.
 GET /v1/clauses/{clause_id}
 ```
 
-Returns:
+Example response: the same shape as a query response's citation object (§31), plus the clause's directly connected graph relationships:
 
-* clause text,
-* metadata,
-* source,
-* applicability,
-* connected graph relationships.
+```json
+{
+  "document_id": "document_x",
+  "document_title": "Regulatory publication",
+  "regulator": "RBI",
+  "reference_number": "public-reference",
+  "publication_date": "YYYY-MM-DD",
+  "clause_id": "clause_x",
+  "clause_number": "4.2",
+  "clause_text": "Full text of the cited clause, quoted verbatim.",
+  "status": "active",
+  "page": 7,
+  "source_url": "official-public-source",
+  "relationships": [
+    { "type": "SUPERSEDES", "target_clause_id": "clause_y", "effective_date": "YYYY-MM-DD" }
+  ]
+}
+```
+
+`404` if `clause_id` does not exist. This endpoint is what the web UI's citation panel calls when a user opens a citation marker (`[1]`, `[2]`, ...) from an answer.
 
 ---
 
@@ -1251,7 +1268,21 @@ or:
 GET /v1/clauses/{clause_id}/lineage
 ```
 
-Example conceptual response:
+Returns the full supersession/amendment chain the requested document or clause sits in, as a small graph rather than a flat list, since a chain can branch (an amendment clarified by more than one later circular):
+
+```json
+{
+  "nodes": [
+    { "clause_id": "clause_a", "document_title": "Circular on IT Outsourcing by Banks", "regulator": "RBI", "reference_number": "RBI/2015-16", "document_type": "circular", "status": "superseded" },
+    { "clause_id": "clause_b", "document_title": "Master Direction on Outsourcing of IT Services", "regulator": "RBI", "reference_number": "RBI/2023-24/102", "document_type": "master_direction", "status": "active" }
+  ],
+  "edges": [
+    { "from": "clause_a", "to": "clause_b", "relationship": "SUPERSEDES", "effective_date": "YYYY-MM-DD" }
+  ]
+}
+```
+
+Conceptually, for a longer chain:
 
 ```mermaid
 flowchart LR
@@ -1264,6 +1295,8 @@ flowchart LR
     B --> C
     C --> D
 ```
+
+Exactly one node has `status: "active"`: the provision the query pipeline actually applies (§23). The web UI's lineage view renders `nodes`/`edges` directly; it does not re-derive the graph from citation markers.
 
 ---
 
@@ -1418,8 +1451,10 @@ Even though the MVP uses public regulatory material, the application should foll
 Requirements:
 
 * API credentials via environment variables,
-* Amend-issued API key authentication on any endpoint that reads or writes caller-scoped state (§70.1),
+* Amend-issued API key or authenticated session on any endpoint that reads or writes caller-scoped state (§70.1, §72),
 * encrypted storage of caller-supplied model provider credentials (§70.2),
+* Argon2id password hashing for account authentication, never a fast general-purpose hash (§72),
+* CSRF protection on session-cookie-authenticated, state-changing endpoints (§72),
 * database authentication,
 * network isolation for databases,
 * URL validation for ingestion,
@@ -2257,7 +2292,7 @@ This is a bring-your-own-key (BYOK) design: the deployment declares which provid
   ```
 
   Amend never silently substitutes a provider or model the caller did not ask for.
-* Every request to `/v1/query`, `/v1/credentials`, and any endpoint that reads or writes caller-scoped state must be authenticated with an Amend-issued API key (`Authorization: Bearer <key>`). This is a new requirement introduced by BYOK: storing a caller's provider credentials requires knowing, and authenticating, who the caller is. Amend's own API keys are opaque tokens, stored hashed (never in plaintext), issued through an out-of-band admin process for the MVP (a self-service signup/key-issuance flow is a post-MVP concern, not required to satisfy this requirement).
+* Every request to `/v1/query`, `/v1/credentials`, and any endpoint that reads or writes caller-scoped state must be authenticated, either as a logged-in web session (§72) or with an Amend-issued API key (`Authorization: Bearer <key>`). This is a new requirement introduced by BYOK: storing a caller's provider credentials requires knowing, and authenticating, who the caller is. Both authentication mechanisms resolve to the same underlying account (§72); Amend's own API keys are opaque tokens, stored hashed (never in plaintext), issued through an out-of-band admin process for the MVP (a self-service signup/key-issuance flow is a post-MVP concern, not required to satisfy this requirement).
 
 ## 70.2 Credential storage
 
@@ -2286,6 +2321,24 @@ Response (the key is never echoed back):
 ```
 
 ```http
+GET /v1/credentials
+```
+
+Lists the authenticated caller's configured credentials (never the key itself):
+
+```json
+[
+  { "provider": "anthropic", "model_id": "claude-sonnet-4-5", "key_suffix": "8k2p", "is_default": true, "created_at": "2026-08-07T00:00:00Z" }
+]
+```
+
+```http
+PATCH /v1/credentials/{provider}
+```
+
+Request `{ "is_default": true }` marks that provider's credential as the caller's default, used to preselect a model where the UI needs one (for example, a new chat with no model chosen yet). Setting one credential's default clears it on any other (§1.5's `idx_model_credentials_one_default` enforces at most one).
+
+```http
 DELETE /v1/credentials/{provider}
 ```
 
@@ -2294,7 +2347,7 @@ Removes the caller's stored credential for that provider.
 Storage rules:
 
 * The submitted key is encrypted at rest (envelope encryption, AES-GCM via `cryptography.fernet`) using a master key (`CREDENTIAL_ENCRYPTION_KEY`) held only in the deployment's secret store, never in the database. See [docs/DATA_MODEL.md](./DATA_MODEL.md) for the `model_credentials` table.
-* A credential is scoped to exactly one `(caller, provider)` pair. Amend decrypts it in memory for the duration of a single request and never writes the decrypted value to logs, telemetry, or error messages.
+* A credential is scoped to exactly one `(user_id, provider)` pair (§72), regardless of whether the request that added it came in via a session cookie or an API key. Amend decrypts it in memory for the duration of a single request and never writes the decrypted value to logs, telemetry, or error messages.
 * `GET /v1/models` returns, for the authenticated caller, the supported providers and whether that caller has a credential configured for each (`configured: true/false`) plus each provider's known model IDs, so the UI can populate a selection control and prompt for missing credentials.
 * If `POST /v1/query` specifies a provider the caller has not configured, the API returns `424 Failed Dependency` with a message directing them to `POST /v1/credentials`, not a fallback to any other provider.
 
@@ -2331,6 +2384,7 @@ Embeddings are pluggable too, but the constraint is different from chat models: 
 * **Ingestion time (deployment-owned):** the corpus is embedded once, offline, by the ingestion worker, using `INGESTION_EMBEDDING_PROVIDER` / `INGESTION_EMBEDDING_MODEL_ID` / `INGESTION_EMBEDDING_API_KEY` (deployment-level env configuration, not BYOK, since the corpus is shared across all callers). A deployment may maintain more than one embedding index (for example, to evaluate a new embedding model against the current one per §60) by running ingestion again with a different embedding model into a separate table; see [docs/DATA_MODEL.md](./DATA_MODEL.md).
 * **Query time:** `GET /v1/models` also returns the embedding models that currently have a built index, each identified by an `embedding_model_id`. A caller may pass `retrieval.embedding_model_id` in `POST /v1/query` to select which index to search; omitting it uses the deployment's single default index (most deployments will only maintain one). The query text is embedded with that same model before the vector search stage (§20).
 * Switching the active embedding index does not require caller-supplied credentials: it selects among indexes the deployment already built, it does not call an embedding model on the caller's behalf.
+* Registering a *candidate* embedding model (declaring that a provider/model/dimension combination should exist as an index) is a lightweight API action available from the web UI; it does not build the index. See [§75 Embedding Index Registration API](#75-embedding-index-registration-api) for the split between registering a candidate and an operator actually building it.
 
 ## 70.5 Constraints
 
@@ -2347,3 +2401,136 @@ Embeddings are pluggable too, but the constraint is different from chat models: 
 Design rationale and the evaluation of related agent-runtime capabilities (memory, streaming, hooks, and so on) that this decision sits alongside: [docs/decisions/0001-agent-runtime-capabilities.md](./decisions/0001-agent-runtime-capabilities.md).
 
 Storage: [docs/DATA_MODEL.md](./DATA_MODEL.md), `conversations` and `conversation_turns`.
+
+---
+
+# 72. Account Authentication
+
+The web app authenticates human users with an email/password login, distinct from the Amend API key bearer-token auth in §70.1: both exist, and both resolve to the same underlying account. Rationale and alternatives considered: [ADR 0003](./decisions/0003-account-authentication.md).
+
+```http
+POST /v1/auth/login
+```
+
+Request:
+
+```json
+{ "email": "analyst@example.com", "password": "..." }
+```
+
+On success, sets an httpOnly, `Secure`, `SameSite=Lax` session cookie and returns:
+
+```json
+{ "user_id": "...", "email": "analyst@example.com", "organization": "Example Bank, compliance desk" }
+```
+
+`401 Unauthorized` on a wrong email/password (the same generic error for both, not "no such user" vs. "wrong password", to avoid confirming which emails have accounts). Login attempts are rate-limited by source IP (§45.1) independent of the per-account limit, since an attacker enumerating accounts is not yet an authenticated caller.
+
+```http
+POST /v1/auth/logout
+```
+
+Revokes the current session (`user_sessions.revoked_at`) and clears the cookie.
+
+Account rules for the MVP:
+
+* Accounts are provisioned by an Amend operator, out-of-band, the same as Amend API keys (§70.1). There is no `POST /v1/users` self-service signup endpoint.
+* Passwords are hashed with Argon2id; Amend never stores or logs a plaintext password.
+* A session is a random opaque token; only its hash is stored (`user_sessions.token_hash`), the same pattern as API keys. Sessions carry a sliding expiration, refreshed on use, and are revocable (logout, or an operator disabling the account).
+* Every endpoint that reads or writes caller-scoped state accepts either a valid session cookie or a valid Amend API key (§70.1); an endpoint must not require one specific mechanism unless it is mechanism-specific by nature (`POST /v1/auth/login` only makes sense unauthenticated; managing API keys, §74, only makes sense from a session, since a key cannot authorize creating another key).
+* State-changing requests authenticated by session cookie must pass a CSRF check (a per-session CSRF token or an equivalent double-submit pattern). Requests authenticated by bearer API key are exempt: a cross-site request cannot attach an `Authorization` header.
+
+---
+
+# 73. Conversation Management API
+
+Lists and manages the conversations shown in the web UI's session sidebar. Storage: [docs/DATA_MODEL.md §1.8](./DATA_MODEL.md#18-conversations-and-conversation_turns-prd-71-73-adr-0001).
+
+```http
+GET /v1/conversations
+```
+
+Returns the authenticated caller's conversations, pinned first, then most recently active:
+
+```json
+[
+  { "conversation_id": "...", "title": "IT outsourcing rules for NBFCs", "pinned": true, "last_active_at": "2026-08-07T00:00:00Z" }
+]
+```
+
+`title` defaults to the first turn's question (truncated); see `PATCH` below to rename.
+
+```http
+PATCH /v1/conversations/{conversation_id}
+```
+
+Request body may set either or both fields:
+
+```json
+{ "pinned": true, "title": "Renamed conversation" }
+```
+
+```http
+DELETE /v1/conversations/{conversation_id}
+```
+
+Deletes the conversation and its turns. `404` if the conversation does not exist or does not belong to the authenticated caller; Amend does not distinguish those two cases in the response, to avoid confirming another caller's conversation IDs.
+
+---
+
+# 74. Credential and API Key Management API
+
+Credential management (`GET`/`PATCH`/`DELETE /v1/credentials`) is specified in [§70.2](#702-credential-storage); this section covers Amend's own API keys, which authenticate the caller rather than a third-party provider.
+
+```http
+GET /v1/api-keys
+```
+
+Lists the authenticated caller's Amend API keys (never the key itself, only its display suffix):
+
+```json
+[
+  { "id": "...", "label": "Production", "key_suffix": "9f3a", "created_at": "2026-06-02T00:00:00Z" }
+]
+```
+
+```http
+DELETE /v1/api-keys/{id}
+```
+
+Revokes a key (`api_keys.revoked_at`); a revoked key fails authentication immediately on its next use.
+
+Issuing a *new* key (`POST /v1/api-keys`) is not part of the MVP: keys are still issued out-of-band by an operator, tied to a `user_id` (§70.1, ADR 0003). The Settings API keys screen therefore ships list-and-revoke only for the MVP; a self-service "generate new key" action is explicitly post-MVP, consistent with the existing decision in §70.1.
+
+---
+
+# 75. Embedding Index Registration API
+
+Splits into two distinct actions that must not be conflated (see [docs/DATA_MODEL.md §1.3](./DATA_MODEL.md#13-embeddings-and-embedding-model-registry-prd-704) for the schema backing this): registering a candidate embedding model is a runtime API action; building the actual index is still an offline ops action, unchanged from §70.4.
+
+```http
+GET /v1/embedding-indexes
+```
+
+Returns every registered embedding model and its status:
+
+```json
+[
+  { "embedding_model_id": "openai:text-embedding-3-large", "provider": "openai", "model_id": "text-embedding-3-large", "status": "ready", "clause_count": 84213, "is_default": true },
+  { "embedding_model_id": "voyage:voyage-law-2", "provider": "voyage", "model_id": "voyage-law-2", "status": "registered", "clause_count": 0, "is_default": false }
+]
+```
+
+```http
+POST /v1/embedding-indexes
+```
+
+Request:
+
+```json
+{ "provider": "voyage", "model_id": "voyage-law-2", "dimension": 1024 }
+```
+
+Inserts a `status: "registered"` row (`table_name` left unset). This call does not create a pgvector table, does not run ingestion, and is not itself an embedding-model API call: it only records that an operator should build this index. `dimension` is supplied by the caller because it is a known constant of the named model, not something Amend can discover without calling the provider.
+
+An operator later builds the index offline (creates the `clause_embeddings_<slug>` table, runs ingestion, flips the row to `status: "ready"` with a real `table_name`), the same migration-driven process §70.4 already specifies. Only `ready` rows are usable as `retrieval.embedding_model_id` in `POST /v1/query` or eligible as the default; the API rejects setting a `registered` row as default.

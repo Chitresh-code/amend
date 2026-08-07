@@ -63,13 +63,19 @@ CREATE TABLE embedding_models (
     provider            TEXT NOT NULL,
     model_id             TEXT NOT NULL,
     dimension            INT NOT NULL,
-    table_name           TEXT NOT NULL UNIQUE,  -- e.g. 'clause_embeddings_openai_text_embedding_3_large'
+    status                TEXT NOT NULL DEFAULT 'registered',  -- registered, building, ready
+    table_name           TEXT UNIQUE,             -- e.g. 'clause_embeddings_openai_text_embedding_3_large'; NULL until 'ready'
     is_default            BOOLEAN NOT NULL DEFAULT false,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
-Registering a new embedding model is an ops action (ingestion configuration, PRD §70.4), performed through a migration, not a runtime client request; `table_name` is never built from request input, which is what makes per-model dynamic table creation safe here. Example for one registered model:
+Two distinct actions share this table, and it is important they stay distinct (PRD §75):
+
+* **Registering** (`POST /v1/embedding-indexes`, PRD §75) is a runtime client request from the Settings Retrieval tab. It only records that a provider/model/dimension is a candidate embedding index, inserting a `status = 'registered'` row with `table_name = NULL`. It does not create a table, does not run ingestion, and does not touch pgvector.
+* **Building** the index (creating the `clause_embeddings_<slug>` table below, running ingestion into it, and flipping the row to `status = 'ready'` with a real `table_name`) stays an ops action performed through a migration, exactly as before. `table_name` is still never built from request input; it is only ever set by that offline step, which is what keeps dynamic per-model table creation safe.
+
+Only `ready` rows are eligible as `retrieval.embedding_model_id` in `POST /v1/query` (PRD §70.4) or as the default; a `registered` row with no table yet is visible in Settings so an operator knows ingestion work is pending, but the query path never searches it. Example table for one built (`ready`) model:
 
 ```sql
 CREATE TABLE clause_embeddings_openai_text_embedding_3_large (
@@ -85,32 +91,69 @@ CREATE INDEX idx_emb_openai_3_large_hnsw
 
 The ingestion worker writes to whichever table `INGESTION_EMBEDDING_PROVIDER`/`INGESTION_EMBEDDING_MODEL_ID` resolves to via `embedding_models.table_name`. The query path (§20) embeds the caller's question with the same model, per the `retrieval.embedding_model_id` request field in PRD §70.4, and searches only that table.
 
-### 1.4 `model_credentials` (PRD §70.2)
+### 1.4 `users`, `user_sessions`, and `api_keys` (PRD §72)
+
+`users` is the caller-identity root. A caller can authenticate two ways: an interactive browser session (`user_sessions`, cookie-based) or an Amend API key issued to them for programmatic access (`api_keys`). Both resolve to the same `user_id`, which is what `model_credentials`, `conversations`, and `query_telemetry` scope against (§1.5, §1.7, §1.8). See ADR 0003 for why the identity root moved from `api_keys` to `users`.
 
 ```sql
+CREATE TABLE users (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email          TEXT NOT NULL UNIQUE,
+    password_hash  TEXT NOT NULL,        -- Argon2id
+    organization   TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    disabled_at    TIMESTAMPTZ            -- operator-disabled account; NULL means active
+);
+
+CREATE TABLE user_sessions (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID NOT NULL REFERENCES users(id),
+    token_hash   TEXT NOT NULL UNIQUE,   -- HMAC(SESSION_TOKEN_PEPPER, issued token), never the raw token
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    revoked_at   TIMESTAMPTZ
+);
+
+CREATE INDEX idx_user_sessions_user ON user_sessions (user_id);
+
 CREATE TABLE api_keys (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id),
     key_hash    TEXT NOT NULL UNIQUE,   -- HMAC(API_KEY_HASH_PEPPER, issued key), never the raw key
     label       TEXT NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at  TIMESTAMPTZ
 );
 
-CREATE TABLE model_credentials (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    api_key_id     UUID NOT NULL REFERENCES api_keys(id),
-    provider       TEXT NOT NULL,
-    encrypted_key  BYTEA NOT NULL,      -- Fernet(CREDENTIAL_ENCRYPTION_KEY) ciphertext
-    key_suffix     TEXT NOT NULL,       -- last 4 chars, for display only
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (api_key_id, provider)
-);
+CREATE INDEX idx_api_keys_user ON api_keys (user_id);
 ```
 
-`encrypted_key` is opaque ciphertext; the decryption key (`CREDENTIAL_ENCRYPTION_KEY`) lives only in the deployment's secret store, never in this database. No column here or in `query_telemetry` ever holds a plaintext provider key.
+Accounts are admin-provisioned for the MVP (ADR 0003); there is no `POST /v1/users` self-service signup endpoint. `user_sessions.expires_at` implements the sliding-expiration cookie session (PRD §72); an expired or revoked row is treated as unauthenticated, not deleted immediately, so `last_seen_at` stays available for the short retention window operators need to investigate account activity.
 
-### 1.5 `ingestion_state`
+### 1.5 `model_credentials` (PRD §70.2)
+
+```sql
+CREATE TABLE model_credentials (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        UUID NOT NULL REFERENCES users(id),
+    provider       TEXT NOT NULL,
+    model_id       TEXT NOT NULL,
+    encrypted_key  BYTEA NOT NULL,      -- Fernet(CREDENTIAL_ENCRYPTION_KEY) ciphertext
+    key_suffix     TEXT NOT NULL,       -- last 4 chars, for display only
+    is_default     BOOLEAN NOT NULL DEFAULT false,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, provider)
+);
+
+CREATE UNIQUE INDEX idx_model_credentials_one_default
+    ON model_credentials (user_id) WHERE is_default;
+```
+
+`encrypted_key` is opaque ciphertext; the decryption key (`CREDENTIAL_ENCRYPTION_KEY`) lives only in the deployment's secret store, never in this database. No column here or in `query_telemetry` ever holds a plaintext provider key. `idx_model_credentials_one_default` enforces at most one default credential per user at the database level, not just in application code, matching the pattern already used for `embedding_models.is_default` (§1.3).
+
+### 1.6 `ingestion_state`
 
 ```sql
 CREATE TABLE ingestion_state (
@@ -123,12 +166,13 @@ CREATE TABLE ingestion_state (
 );
 ```
 
-### 1.6 `query_telemetry` (PRD §52)
+### 1.7 `query_telemetry` (PRD §52)
 
 ```sql
 CREATE TABLE query_telemetry (
     query_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    api_key_id           UUID NOT NULL REFERENCES api_keys(id),
+    user_id               UUID NOT NULL REFERENCES users(id),
+    api_key_id            UUID REFERENCES api_keys(id),  -- set only when the request used a bearer key, not a session cookie
     intent                TEXT,
     extracted_entities    JSONB,
     extracted_concepts    JSONB,
@@ -156,15 +200,19 @@ DELETE FROM query_telemetry WHERE created_at < now() - (current_setting('amend.t
 
 run on a schedule (e.g. daily), with `amend.telemetry_retention_days` set from `TELEMETRY_RETENTION_DAYS` at connection time, not hardcoded into the query.
 
-### 1.7 `conversations` and `conversation_turns` (PRD §71, ADR 0001)
+### 1.8 `conversations` and `conversation_turns` (PRD §71, §73, ADR 0001)
 
 ```sql
 CREATE TABLE conversations (
     conversation_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    api_key_id        UUID NOT NULL REFERENCES api_keys(id),
+    user_id           UUID NOT NULL REFERENCES users(id),
+    title             TEXT,             -- defaults to the first turn's question, truncated; user-renamable
+    pinned            BOOLEAN NOT NULL DEFAULT false,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_active_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE INDEX idx_conversations_user ON conversations (user_id, pinned DESC, last_active_at DESC);
 
 CREATE TABLE conversation_turns (
     turn_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -180,7 +228,7 @@ CREATE TABLE conversation_turns (
 CREATE INDEX idx_conversation_turns_conversation ON conversation_turns (conversation_id, turn_index);
 ```
 
-A conversation belongs to exactly one `api_key_id`; nothing here lets one caller read another caller's conversation. `turn_id` links to `query_telemetry.query_id` rather than duplicating token usage/latency/citation fields, so a turn's full pipeline detail stays in one place. Only the last N turns (ADR 0001, bounded context window) are read back when building context for a new turn, not the whole conversation.
+A conversation belongs to exactly one `user_id`; nothing here lets one caller read another caller's conversation, regardless of whether they authenticate via session cookie or API key (§1.4). `turn_id` links to `query_telemetry.query_id` rather than duplicating token usage/latency/citation fields, so a turn's full pipeline detail stays in one place. Only the last N turns (ADR 0001, bounded context window) are read back when building context for a new turn, not the whole conversation. `idx_conversations_user` supports the session-list query directly (§73): pinned conversations first, then most recently active.
 
 ## 2. Neo4j
 

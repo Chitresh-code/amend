@@ -90,13 +90,20 @@ Full design and security constraints (bring-your-own-key, no server default, no 
 
 ## 4. Caller identity, credentials, and rate limiting
 
-Amend is bring-your-own-key (PRD §70): callers supply their own chat-model provider credentials, and Amend stores them encrypted, scoped to the caller. That requires knowing who the caller is, which is a real subsystem, not a side detail:
+Amend is bring-your-own-key (PRD §70): callers supply their own chat-model provider credentials, and Amend stores them encrypted, scoped to the caller. That requires knowing who the caller is, which is a real subsystem, not a side detail.
 
-- Every request to `/v1/query` and `/v1/credentials` is authenticated with an Amend-issued API key (`Authorization: Bearer <key>`). Keys are opaque tokens; only their hash (`api_keys.key_hash`, HMAC with `API_KEY_HASH_PEPPER`) is stored. For the MVP, keys are issued out-of-band by an operator; self-service issuance is a post-MVP concern.
-- `api/app/agents/credentials.py` resolves `(api_key_id, provider) -> decrypted key` against `model_credentials` (see [docs/DATA_MODEL.md §1.4](./DATA_MODEL.md#14-model_credentials-prd-702)), using `CREDENTIAL_ENCRYPTION_KEY` to decrypt. The decrypted value lives only for the duration of the request: it is passed straight into the model factory (§3) and is never logged, never included in query telemetry, and never returned by any API response.
-- The same API key identity is the rate-limiting key (PRD §45.1): a Redis-backed token bucket keyed by `api_key_id` for authenticated endpoints, by source IP for the few unauthenticated ones (`GET /health`). This makes redis a required service, not optional, once more than one `api` instance is running (§8).
+`users` is the identity root (PRD §72, ADR 0003), not `api_keys`. A request resolves to a `user_id` one of two ways:
 
-This is new surface area the original PRD sketch did not have: storing third-party credentials safely is a security-critical subsystem in its own right, and should be reviewed as one, not bundled into general API development.
+- **Session cookie**: the web app's login (email/password, PRD §72) sets an httpOnly session cookie backed by `user_sessions`. This is how the web UI authenticates every screen past login.
+- **Amend API key**: `Authorization: Bearer <key>`, for programmatic access. Keys are opaque tokens issued *to* a user; only their hash (`api_keys.key_hash`, HMAC with `API_KEY_HASH_PEPPER`) is stored. For the MVP, keys are issued out-of-band by an operator; self-service issuance stays a post-MVP concern.
+
+Both resolve to the same `user_id`, and everything caller-scoped hangs off that one identity, not off which mechanism authenticated a given request:
+
+- `api/app/agents/credentials.py` resolves `(user_id, provider) -> decrypted key` against `model_credentials` (see [docs/DATA_MODEL.md §1.5](./DATA_MODEL.md#15-model_credentials-prd-702)), using `CREDENTIAL_ENCRYPTION_KEY` to decrypt. The decrypted value lives only for the duration of the request: it is passed straight into the model factory (§3) and is never logged, never included in query telemetry, and never returned by any API response.
+- The same `user_id` is the rate-limiting key (PRD §45.1): a Redis-backed token bucket keyed by `user_id` for authenticated endpoints, by source IP for the few unauthenticated ones (`GET /health`). This makes redis a required service, not optional, once more than one `api` instance is running (§8).
+- Session-cookie-authenticated, state-changing requests additionally require a CSRF check (PRD §72): a bearer API key cannot be attached by a malicious cross-site request, but a cookie can.
+
+This is new surface area the original PRD sketch did not have: storing third-party credentials safely, and now authenticating human accounts at all, are security-critical subsystems in their own right, and should be reviewed as one, not bundled into general API development.
 
 ## 5. Storage responsibilities
 
@@ -144,7 +151,8 @@ Decisions made explicit here rather than left implicit:
 
 - **Embedding model choice**: pluggable, but at the granularity of a built index, not a free per-request choice, since a query embedding is only comparable to clause embeddings from the same model. Design: [PRD §70.4](./PRD.md#704-embedding-model-pluggability), schema: [docs/DATA_MODEL.md §1.3](./DATA_MODEL.md#13-embeddings-and-embedding-model-registry-prd-704).
 - **Query telemetry retention**: `TELEMETRY_RETENTION_DAYS`, default `7`, enforced by a scheduled purge job. [PRD §52.1](./PRD.md#521-retention).
-- **Rate limiting**: Redis-backed token bucket, keyed by Amend API key (by IP for unauthenticated endpoints). [PRD §45.1](./PRD.md#451-rate-limiting).
+- **Rate limiting**: Redis-backed token bucket, keyed by `user_id` (by IP for unauthenticated endpoints). [PRD §45.1](./PRD.md#451-rate-limiting).
+- **Account authentication**: password login for the web app, admin-provisioned accounts for the MVP, server-side sessions over a cookie. Design: [PRD §72](./PRD.md#72-account-authentication), rationale: [ADR 0003](./decisions/0003-account-authentication.md), schema: [docs/DATA_MODEL.md §1.4](./DATA_MODEL.md#14-users-user_sessions-and-api_keys-prd-72).
 
 Still open, and deliberately not decided here because they need a product or ops decision, not just an engineering default:
 

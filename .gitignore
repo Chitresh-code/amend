@@ -20,3 +20,6 @@ build/
 
 # Local database volumes if bind-mounted for development
 data/
+
+# Internal planning notes, not part of the published docs set
+docs/internal/
