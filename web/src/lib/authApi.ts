@@ -9,6 +9,7 @@ export interface LoginResponse {
 export interface SessionResponse {
   user_id: string;
   email: string;
+  organization: string | null;
 }
 
 export function login(email: string, password: string): Promise<LoginResponse> {
