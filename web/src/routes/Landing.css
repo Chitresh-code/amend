@@ -1,0 +1,155 @@
+.landing {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+}
+
+.landing-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.landing-header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.landing-logo {
+  font-weight: 600;
+  font-size: 16px;
+  margin-right: auto;
+}
+
+.landing-nav {
+  display: flex;
+  gap: 24px;
+}
+
+.landing-nav a {
+  font-size: 14px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.landing-nav a:hover {
+  color: var(--text);
+}
+
+.landing-cta,
+.landing-cta-ghost {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 8px;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.landing-cta {
+  background: var(--accent);
+  color: var(--accent-on);
+}
+
+.landing-cta-ghost {
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.landing-hero {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 80px 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 48px;
+  align-items: center;
+}
+
+.landing-hero-copy h1 {
+  font-size: 40px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+}
+
+.landing-subhead {
+  font-size: 15px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-bottom: 28px;
+  max-width: 460px;
+}
+
+.landing-hero-illustration {
+  display: flex;
+  justify-content: center;
+}
+
+.landing-features {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px 80px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.landing-feature {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.landing-feature h2 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+
+.landing-feature p {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.landing-cta-band {
+  border-top: 1px solid var(--border);
+  padding: 64px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.landing-cta-band h2 {
+  font-size: 22px;
+  max-width: 480px;
+}
+
+.landing-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: 20px 24px;
+  max-width: 1100px;
+  width: 100%;
+  margin-inline: auto;
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+@media (max-width: 720px) {
+  .landing-hero {
+    grid-template-columns: 1fr;
+    padding: 48px 20px;
+  }
+
+  .landing-features {
+    grid-template-columns: 1fr;
+  }
+}

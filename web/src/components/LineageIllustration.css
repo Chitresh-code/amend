@@ -1,0 +1,53 @@
+.lineage-illustration {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 420 / 150;
+}
+
+.lineage-illustration-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.lineage-illustration-node {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--text-faint);
+  cursor: pointer;
+}
+
+.lineage-illustration-node.is-current {
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  background: var(--accent);
+  border: none;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.lineage-illustration-tooltip {
+  position: absolute;
+  bottom: 24px;
+  left: -8px;
+  min-width: 140px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px oklch(0% 0 0 / 0.2);
+}
+
+.lineage-illustration-tooltip-ref {
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
