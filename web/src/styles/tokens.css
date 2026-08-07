@@ -1,0 +1,49 @@
+:root {
+  --bg: oklch(98.4% 0.003 255);
+  --surface: oklch(100% 0 0);
+  --surface-2: oklch(96.7% 0.004 255);
+  --border: oklch(89% 0.006 255);
+  --text: oklch(19% 0.01 255);
+  --text-muted: oklch(46% 0.012 255);
+  --text-faint: oklch(64% 0.01 255);
+  --accent: oklch(56% 0.15 255);
+  --accent-on: white;
+  --accent-soft: oklch(94% 0.035 255);
+  --success: oklch(50% 0.12 145);
+  --success-soft: oklch(95% 0.03 145);
+
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: oklch(15.5% 0.007 255);
+    --surface: oklch(19.5% 0.008 255);
+    --surface-2: oklch(22.5% 0.009 255);
+    --border: oklch(30% 0.012 255);
+    --text: oklch(95% 0.004 255);
+    --text-muted: oklch(70% 0.012 255);
+    --text-faint: oklch(52% 0.014 255);
+    --accent: oklch(72% 0.15 255);
+    --accent-on: oklch(15% 0.01 255);
+    --accent-soft: oklch(27% 0.05 255);
+    --success: oklch(68% 0.13 145);
+    --success-soft: oklch(26% 0.06 145);
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: oklch(15.5% 0.007 255);
+  --surface: oklch(19.5% 0.008 255);
+  --surface-2: oklch(22.5% 0.009 255);
+  --border: oklch(30% 0.012 255);
+  --text: oklch(95% 0.004 255);
+  --text-muted: oklch(70% 0.012 255);
+  --text-faint: oklch(52% 0.014 255);
+  --accent: oklch(72% 0.15 255);
+  --accent-on: oklch(15% 0.01 255);
+  --accent-soft: oklch(27% 0.05 255);
+  --success: oklch(68% 0.13 145);
+  --success-soft: oklch(26% 0.06 145);
+}

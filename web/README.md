@@ -1,5 +1,15 @@
 # Amend Web
 
-Not scaffolded yet. Framework and structure are deliberately undecided until the UI designs land; see [../docs/decisions/0002-monorepo-layout.md](../docs/decisions/0002-monorepo-layout.md) for why this directory exists ahead of any code.
+React + TypeScript + Vite, routed with React Router. See the [repository root README](../README.md) for the monorepo overview and [../docs/](../docs/) for product requirements, architecture, and schema. Delivery plan: [../docs/internal/epics-web-mvp.md](../docs/internal/epics-web-mvp.md).
 
-Once a stack is chosen, this file is replaced with the real quickstart, following the same pattern as [../api/README.md](../api/README.md): how to install, run, lint, and test this service, plus a pointer back to [../docs/](../docs/) rather than duplicating product or architecture content here.
+## Development
+
+```bash
+cd web
+npm install
+npm run dev
+npm run lint
+npm run build
+```
+
+`npm run build` type-checks (`tsc -b`) before bundling. There is no test runner configured yet; add one when a component has behavior worth testing beyond type checking.
