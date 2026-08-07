@@ -1,7 +1,7 @@
 [project]
-name = "amend"
+name = "amend-api"
 version = "0.1.0"
-description = "Graph-grounded regulatory research system for public RBI and SEBI publications"
+description = "Amend API: retrieval pipeline, LLM layer, and data access"
 requires-python = ">=3.12"
 readme = "README.md"
 dependencies = [
@@ -29,9 +29,6 @@ ollama = ["strands-agents[ollama]"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# docs/ contains illustrative code fences (not real source); ruff's markdown
-# formatting would fight their intentional inline comment alignment.
-extend-exclude = ["docs/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

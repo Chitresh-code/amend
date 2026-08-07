@@ -14,6 +14,14 @@ Full product requirements: [docs/PRD.md](./docs/PRD.md).
 * **[Strands Agents](https://strandsagents.com/)** for the LLM layer. Chat models are bring-your-own-key: each caller supplies their own provider credentials (Anthropic, OpenAI, Gemini, Ollama, ...), stored encrypted and scoped to them, not configured once for the whole deployment
 * **Docker Compose** for local and reproducible deployment
 
+## Layout
+
+Monorepo:
+
+* **[api/](./api/)**: the FastAPI service. Self-contained: `cd api && uv sync`. See [api/README.md](./api/README.md).
+* **[web/](./web/)**: frontend, not yet scaffolded. Framework choice is pending UI designs; see [web/README.md](./web/README.md).
+* **docs/**, `docker-compose.yml`, `.env.example`, this file: describe or orchestrate the whole system, not one app.
+
 ## Repository guide
 
 | Document | Purpose |
@@ -46,4 +54,4 @@ API documentation is served through FastAPI's OpenAPI interface once the `api` s
 
 ## Status
 
-Early scaffold. Architecture and evaluation targets are defined in the PRD; implementation follows the phased plan in [docs/PRD.md §64](./docs/PRD.md#64-implementation-phases).
+Early scaffold. Architecture and evaluation targets are defined in the PRD; implementation follows the phased plan in [docs/PRD.md §64](./docs/PRD.md#64-implementation-phases). `web/` is a placeholder pending UI designs.

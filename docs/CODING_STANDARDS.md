@@ -1,6 +1,6 @@
 # Amend: Coding Standards
 
-Applies to all code in this repository, human- or agent-authored. See [ARCHITECTURE.md](./ARCHITECTURE.md) for component boundaries, [DATA_MODEL.md](./DATA_MODEL.md) for schema, and [AGENTS.md](../AGENTS.md) for the engineering principles that govern how work is done, not just how code looks.
+Applies to `api/`, human- or agent-authored; paths below are relative to that directory unless stated otherwise. `web/` has no code yet (see [docs/decisions/0002-monorepo-layout.md](./decisions/0002-monorepo-layout.md)) and will get its own conventions once a stack is chosen, likely in a `web/`-scoped section here rather than a separate file. See [ARCHITECTURE.md](./ARCHITECTURE.md) for component boundaries, [DATA_MODEL.md](./DATA_MODEL.md) for schema, and [AGENTS.md](../AGENTS.md) for the engineering principles that govern how work is done, not just how code looks.
 
 ## Language and tooling
 
@@ -35,7 +35,7 @@ Follow the comment standard in [AGENTS.md](../AGENTS.md#evidence-driven-engineer
 
 ## Testing
 
-- Every deterministic pipeline stage (`app/pipeline/`) has unit tests that run without a live database or model: construct `PipelineState` directly, assert on the output state.
+- Every deterministic pipeline stage (`api/app/pipeline/`) has unit tests that run without a live database or model: construct `PipelineState` directly, assert on the output state.
 - Every API route has at least one integration test against a test database (docker-compose test profile or an ephemeral fixture), covering the success path and the documented failure modes (validation error, not-found, insufficient-evidence response).
 - Strands `Agent` calls are not mocked to assert they "worked": mocking an LLM call and asserting success proves nothing about grounding quality. Instead:
   - Deterministic logic around the agent (prompt construction, evidence formatting, citation extraction/validation) is unit tested directly.
@@ -48,7 +48,7 @@ Follow the comment standard in [AGENTS.md](../AGENTS.md#evidence-driven-engineer
 - **Cypher**: parameterized queries only, via the driver's parameter binding. Never format user input into a Cypher string. Code review should treat any f-string or `.format()` near a Cypher query as a blocking finding.
 - **SQL**: parameterized queries or a query builder, same rule.
 - **Ingestion URLs**: validate against an explicit allowlist of regulator domains before fetching (PRD §45); reject redirects outside the allowlist.
-- **Secrets**: environment variables only, loaded through `app/config.py`. Never a literal default value for a credential: missing config fails startup rather than falling back to an empty string or a placeholder key.
+- **Secrets**: environment variables only, loaded through `api/app/config.py`. Never a literal default value for a credential: missing config fails startup rather than falling back to an empty string or a placeholder key.
 - **Caller-supplied model credentials** (PRD §70.2): decrypt only for the duration of the request that needs them. Never log a decrypted key, include it in an exception message, write it to query telemetry, or return it from any endpoint (`POST /v1/credentials` returns a masked suffix, never the key). Treat any code path that could put a decrypted credential into a log statement or error response as a blocking security finding.
 - **Prompt boundary**: when constructing agent input, retrieved document text is passed as clearly delimited, labeled evidence (PRD §46). It is never concatenated into the system prompt, and the agent's system prompt explicitly instructs it to treat document content as data, not instructions.
 - **Logging**: structured logging, not string concatenation. Query telemetry never includes raw user PII beyond what PRD §47 and §52 explicitly call for, and never includes decrypted provider credentials.

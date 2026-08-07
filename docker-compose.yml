@@ -1,9 +1,10 @@
-# postgres and neo4j are runnable now. api and worker require the app/ package
-# from PRD §64 Phase 1 onward and will fail to start until that code exists.
+# postgres and neo4j are runnable now. api and worker require the api/app
+# package and will fail to start until that code exists. web is not listed
+# yet: added once a frontend stack is chosen.
 services:
   api:
     build:
-      context: .
+      context: ./api
       dockerfile: Dockerfile
     command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
@@ -17,11 +18,11 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./app:/app/app
+      - ./api/app:/app/app
 
   worker:
     build:
-      context: .
+      context: ./api
       dockerfile: Dockerfile
     command: python -m app.ingestion
     env_file: .env
@@ -31,7 +32,7 @@ services:
       neo4j:
         condition: service_healthy
     volumes:
-      - ./app:/app/app
+      - ./api/app:/app/app
 
   redis:
     image: redis:7-alpine
