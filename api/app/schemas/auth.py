@@ -15,3 +15,4 @@ class LoginResponse(BaseModel):
 class SessionResponse(BaseModel):
     user_id: str
     email: str
+    organization: str | None

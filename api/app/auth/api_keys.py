@@ -18,7 +18,7 @@ async def resolve_api_key(conn: AsyncConnection, raw_key: str) -> SessionUser | 
     row = await (
         await conn.execute(
             """
-            SELECT u.id, u.email
+            SELECT u.id, u.email, u.organization
             FROM api_keys k
             JOIN users u ON u.id = k.user_id
             WHERE k.key_hash = %s
@@ -30,5 +30,5 @@ async def resolve_api_key(conn: AsyncConnection, raw_key: str) -> SessionUser | 
     ).fetchone()
     if row is None:
         return None
-    user_id, email = row
-    return SessionUser(user_id=user_id, email=email)
+    user_id, email, organization = row
+    return SessionUser(user_id=user_id, email=email, organization=organization)

@@ -2537,4 +2537,16 @@ Request:
 
 Inserts a `status: "registered"` row (`table_name` left unset). This call does not create a pgvector table, does not run ingestion, and is not itself an embedding-model API call: it only records that an operator should build this index. `dimension` is supplied by the caller because it is a known constant of the named model, not something Amend can discover without calling the provider.
 
-An operator later builds the index offline (creates the `clause_embeddings_<slug>` table, runs ingestion, flips the row to `status: "ready"` with a real `table_name`), the same migration-driven process §70.4 already specifies. Only `ready` rows are usable as `retrieval.embedding_model_id` in `POST /v1/query` or eligible as the default; the API rejects setting a `registered` row as default.
+An operator later builds the index offline (creates the `clause_embeddings_<slug>` table, runs ingestion, flips the row to `status: "ready"` with a real `table_name`), the same migration-driven process §70.4 already specifies. Only `ready` rows are usable as `retrieval.embedding_model_id` in `POST /v1/query` or eligible as the default.
+
+```http
+PATCH /v1/embedding-indexes/{embedding_model_id}
+```
+
+Request:
+
+```json
+{ "is_default": true }
+```
+
+Sets the index as default. `400` if the row's `status` is not `ready`: a `registered` candidate with no built table cannot be the default retrieval target.

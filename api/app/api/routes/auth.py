@@ -95,4 +95,6 @@ async def logout(
 async def get_session(
     caller: AuthenticatedCaller = Depends(get_current_caller),
 ) -> SessionResponse:
-    return SessionResponse(user_id=str(caller.user_id), email=caller.email)
+    return SessionResponse(
+        user_id=str(caller.user_id), email=caller.email, organization=caller.organization
+    )

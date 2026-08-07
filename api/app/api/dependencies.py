@@ -18,6 +18,7 @@ UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 class AuthenticatedCaller:
     user_id: UUID
     email: str
+    organization: str | None
     auth_method: Literal["session", "api_key"]
 
 
@@ -32,7 +33,10 @@ async def get_current_caller(
         if api_user is None:
             raise HTTPException(status_code=401, detail="Invalid API key")
         return AuthenticatedCaller(
-            user_id=api_user.user_id, email=api_user.email, auth_method="api_key"
+            user_id=api_user.user_id,
+            email=api_user.email,
+            organization=api_user.organization,
+            auth_method="api_key",
         )
 
     session_token = request.cookies.get(settings.session_cookie_name)
@@ -48,7 +52,10 @@ async def get_current_caller(
                 raise HTTPException(status_code=403, detail="CSRF check failed")
 
         return AuthenticatedCaller(
-            user_id=session_user.user_id, email=session_user.email, auth_method="session"
+            user_id=session_user.user_id,
+            email=session_user.email,
+            organization=session_user.organization,
+            auth_method="session",
         )
 
     raise HTTPException(status_code=401, detail="Authentication required")

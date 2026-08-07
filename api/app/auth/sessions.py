@@ -14,6 +14,7 @@ from app.config import settings
 class SessionUser:
     user_id: UUID
     email: str
+    organization: str | None
 
 
 def _hash_token(raw_token: str, pepper: str) -> str:
@@ -40,7 +41,7 @@ async def resolve_session(conn: AsyncConnection, raw_token: str) -> SessionUser 
     row = await (
         await conn.execute(
             """
-            SELECT s.id, u.id, u.email
+            SELECT s.id, u.id, u.email, u.organization
             FROM user_sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.token_hash = %s
@@ -54,13 +55,13 @@ async def resolve_session(conn: AsyncConnection, raw_token: str) -> SessionUser 
     if row is None:
         return None
 
-    session_id, user_id, email = row
+    session_id, user_id, email, organization = row
     new_expires_at = datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours)
     await conn.execute(
         "UPDATE user_sessions SET last_seen_at = now(), expires_at = %s WHERE id = %s",
         (new_expires_at, session_id),
     )
-    return SessionUser(user_id=user_id, email=email)
+    return SessionUser(user_id=user_id, email=email, organization=organization)
 
 
 async def revoke_session(conn: AsyncConnection, raw_token: str) -> None:

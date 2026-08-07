@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.api_keys import router as api_keys_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.credentials import router as credentials_router
+from app.api.routes.embedding_indexes import router as embedding_indexes_router
 from app.config import settings
 from app.db import close_pool, open_pool
 from app.redis import close_redis, open_redis
@@ -34,6 +36,8 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(credentials_router)
 app.include_router(conversations_router)
+app.include_router(api_keys_router)
+app.include_router(embedding_indexes_router)
 
 
 @app.get("/health")
