@@ -6,6 +6,8 @@ Instructions for any coding agent (Claude, or any other agentic model) working i
 
 Amend is a graph-grounded regulatory research system over public RBI/SEBI publications: PostgreSQL/pgvector for semantic retrieval, Neo4j for regulatory lineage and supersession, FastAPI for the API, Strands Agents for the LLM layer (pluggable model provider, selectable from the UI). Full detail in the PRD.
 
+Monorepo: `api/` (the FastAPI service, self-contained, `cd api && uv sync`) and `web/` (frontend, not yet scaffolded, pending UI designs). `docs/`, `docker-compose.yml`, and this file describe or orchestrate both and live at the repository root. See [docs/decisions/0002-monorepo-layout.md](./docs/decisions/0002-monorepo-layout.md).
+
 ## Git workflow
 
 - **Never commit or push directly to `main`.** All changes go through a branch and a pull request, no exceptions for "small" changes.

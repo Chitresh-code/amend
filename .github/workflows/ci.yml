@@ -1,5 +1,11 @@
 # No Postgres/Neo4j service containers yet: there is no integration-test code
-# exercising them (docs/CODING_STANDARDS.md#testing). Add them here when that lands.
+# exercising them. Add them here when that lands.
+#
+# Runs unconditionally (no path filtering) even though this is a monorepo with
+# api/ and web/: main's branch protection requires the "test" status check on
+# every PR, and a path-filtered job doesn't report a status at all when
+# skipped, which would leave web-only PRs permanently unmergeable. Revisit
+# once a web CI job exists.
 name: CI
 
 on:
@@ -9,8 +15,13 @@ on:
     branches: [main]
 
 jobs:
+  # Job id "test" is a required status check in main's branch protection rule;
+  # keep this id stable even if the workflow is otherwise restructured.
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -18,6 +29,7 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
+          working-directory: api
 
       - name: Install the project
         run: uv sync --locked --dev

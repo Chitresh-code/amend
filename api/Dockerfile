@@ -1,4 +1,4 @@
-# Builds once the app/ package exists (PRD §64 Phase 1 onward).
+# Builds once the app/ package exists.
 FROM python:3.12-slim
 
 WORKDIR /app

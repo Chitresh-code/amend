@@ -32,8 +32,8 @@ Three independent concerns, each owned by a different layer:
 
 | Concern | Owner | Why |
 |---|---|---|
-| Is this retrieval step correct? | Deterministic Python (`app/pipeline/`) | Needs to be testable and identical across model providers |
-| What does the evidence mean, in natural language? | Strands Agents (`app/agents/`) | The only place an LLM is actually needed |
+| Is this retrieval step correct? | Deterministic Python (`api/app/pipeline/`) | Needs to be testable and identical across model providers |
+| What does the evidence mean, in natural language? | Strands Agents (`api/app/agents/`) | The only place an LLM is actually needed |
 | Is the data structurally and semantically true? | PostgreSQL/pgvector + Neo4j | Storage of record, not derived state |
 
 ## 2. Why the pipeline is not a graph-execution framework
@@ -66,10 +66,10 @@ Each stage is a pure function over `PipelineState`, independently unit-testable 
 
 Only two stages call a model:
 
-- **Query understanding** (`app/agents/query_agent.py`): natural language mapped to intent, entities, concepts, and `as_of_date`. Structured output, not free text.
-- **Answer generation** (`app/agents/answer_agent.py`): validated evidence mapped to a grounded answer with citations. Evidence is passed as explicitly labeled context, never concatenated with instructions (PRD §46, prompt injection protection).
+- **Query understanding** (`api/app/agents/query_agent.py`): natural language mapped to intent, entities, concepts, and `as_of_date`. Structured output, not free text.
+- **Answer generation** (`api/app/agents/answer_agent.py`): validated evidence mapped to a grounded answer with citations. Evidence is passed as explicitly labeled context, never concatenated with instructions (PRD §46, prompt injection protection).
 
-Both are constructed through a **model factory** (`app/agents/models.py`) that resolves an allowlisted `(provider, model_id)` pair, sourced from server config or a validated request field, into a Strands model object:
+Both are constructed through a **model factory** (`api/app/agents/models.py`) that resolves an allowlisted `(provider, model_id)` pair, sourced from server config or a validated request field, into a Strands model object:
 
 ```python
 from strands import Agent
@@ -93,7 +93,7 @@ Full design and security constraints (bring-your-own-key, no server default, no 
 Amend is bring-your-own-key (PRD §70): callers supply their own chat-model provider credentials, and Amend stores them encrypted, scoped to the caller. That requires knowing who the caller is, which is a real subsystem, not a side detail:
 
 - Every request to `/v1/query` and `/v1/credentials` is authenticated with an Amend-issued API key (`Authorization: Bearer <key>`). Keys are opaque tokens; only their hash (`api_keys.key_hash`, HMAC with `API_KEY_HASH_PEPPER`) is stored. For the MVP, keys are issued out-of-band by an operator; self-service issuance is a post-MVP concern.
-- `app/agents/credentials.py` resolves `(api_key_id, provider) -> decrypted key` against `model_credentials` (see [docs/DATA_MODEL.md §1.4](./DATA_MODEL.md#14-model_credentials-prd-702)), using `CREDENTIAL_ENCRYPTION_KEY` to decrypt. The decrypted value lives only for the duration of the request: it is passed straight into the model factory (§3) and is never logged, never included in query telemetry, and never returned by any API response.
+- `api/app/agents/credentials.py` resolves `(api_key_id, provider) -> decrypted key` against `model_credentials` (see [docs/DATA_MODEL.md §1.4](./DATA_MODEL.md#14-model_credentials-prd-702)), using `CREDENTIAL_ENCRYPTION_KEY` to decrypt. The decrypted value lives only for the duration of the request: it is passed straight into the model factory (§3) and is never logged, never included in query telemetry, and never returned by any API response.
 - The same API key identity is the rate-limiting key (PRD §45.1): a Redis-backed token bucket keyed by `api_key_id` for authenticated endpoints, by source IP for the few unauthenticated ones (`GET /health`). This makes redis a required service, not optional, once more than one `api` instance is running (§8).
 
 This is new surface area the original PRD sketch did not have: storing third-party credentials safely is a security-critical subsystem in its own right, and should be reviewed as one, not bundled into general API development.
@@ -112,21 +112,22 @@ Application code never issues Cypher built from unescaped user input (PRD §45);
 
 These are separate processes with separate failure domains:
 
-- **Ingestion worker** (`app/ingestion/`) runs offline or on a schedule, fetches from public sources, parses, segments into clauses, extracts entities/concepts/relationships, writes to Postgres and Neo4j. Idempotent by design (PRD §11): re-running must not duplicate nodes, edges, or embeddings.
-- **Query path** (`app/api/` to `app/pipeline/` to `app/agents/`) is synchronous, read-only against Postgres/Neo4j, and the only path that calls a model at request time.
+- **Ingestion worker** (`api/app/ingestion/`) runs offline or on a schedule, fetches from public sources, parses, segments into clauses, extracts entities/concepts/relationships, writes to Postgres and Neo4j. Idempotent by design (PRD §11): re-running must not duplicate nodes, edges, or embeddings.
+- **Query path** (`api/app/api/` to `api/app/pipeline/` to `api/app/agents/`) is synchronous, read-only against Postgres/Neo4j, and the only path that calls a model at request time.
 
 The ingestion worker may also use an LLM (`llm_extraction` as an extraction method, PRD §15). That is a separate, offline model call using its own deployment-owned credentials (`INGESTION_EMBEDDING_*`, distinct from the per-caller BYOK credentials in §4), not on the query request path, and has no latency budget from PRD §62.
 
 ## 7. Directory layout
 
-See [PRD §63](./PRD.md#63-repository-structure) for the authoritative structure. Two deltas from the original PRD sketch, both explained above:
+See [PRD §63](./PRD.md#63-repository-structure) for the authoritative structure. Deltas from the original single-service sketch:
 
-- `app/workflows/` becomes `app/pipeline/` (deterministic stages): no graph-execution framework.
-- New `app/agents/`: Strands `Agent` instances, the model factory, and credential resolution, isolated from pipeline logic.
+- Monorepo split: the whole former repository root moved to `api/`, alongside a placeholder `web/` for the frontend. Rationale, including why CI is not path-filtered: [docs/decisions/0002-monorepo-layout.md](./decisions/0002-monorepo-layout.md).
+- `api/app/workflows/` becomes `api/app/pipeline/` (deterministic stages): no graph-execution framework.
+- New `api/app/agents/`: Strands `Agent` instances, the model factory, and credential resolution, isolated from pipeline logic.
 
 ## 8. Deployment
 
-Docker Compose services per PRD §44: `api`, `worker`, `postgres`, `neo4j`, `redis` (required, backs rate limiting per §4; optionally `model`/`object-storage`). No infrastructure-specific hostnames or credentials in the repository; everything goes through environment variables, loaded via `app/config.py` (pydantic settings) and documented in `.env.example`.
+Docker Compose services per PRD §44: `api`, `worker`, `postgres`, `neo4j`, `redis` (required, backs rate limiting per §4; optionally `model`/`object-storage`). `api`/`worker` build from `./api` as their context. `web` is not yet a service: added once a frontend stack exists (ADR 0002). No infrastructure-specific hostnames or credentials in the repository; everything goes through environment variables, loaded via `api/app/config.py` (pydantic settings) and documented in `.env.example`.
 
 ## 9. Agent runtime capabilities
 

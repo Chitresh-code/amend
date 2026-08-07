@@ -1828,64 +1828,80 @@ Latency should be tracked by pipeline stage.
 
 # 63. Repository Structure
 
+Monorepo: `api/` and `web/` are independent projects, each with its own dependency manifest; `docs/`, `docker-compose.yml`, and `.env.example` at the root describe or orchestrate the whole system rather than belonging to either. Rationale: [docs/decisions/0002-monorepo-layout.md](./decisions/0002-monorepo-layout.md).
+
 ```text
 amend/
 │
-├── app/
-│   ├── api/
-│   │   ├── routes/
-│   │   └── dependencies.py
+├── api/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── routes/
+│   │   │   └── dependencies.py
+│   │   │
+│   │   ├── graph/
+│   │   │   ├── queries.py
+│   │   │   ├── lineage.py
+│   │   │   ├── supersession.py
+│   │   │   └── contradictions.py
+│   │   │
+│   │   ├── retrieval/
+│   │   │   ├── vector.py
+│   │   │   ├── graph.py
+│   │   │   ├── hybrid.py
+│   │   │   └── reranker.py
+│   │   │
+│   │   ├── pipeline/
+│   │   │   ├── pipeline.py
+│   │   │   ├── state.py
+│   │   │   └── stages/
+│   │   │
+│   │   ├── agents/
+│   │   │   ├── models.py          # Strands model provider factory/registry
+│   │   │   ├── credentials.py     # BYOK credential resolution (§70.2)
+│   │   │   ├── query_agent.py     # query understanding (Strands Agent)
+│   │   │   └── answer_agent.py    # grounded answer generation (Strands Agent)
+│   │   │
+│   │   ├── ingestion/
+│   │   │   ├── loaders/
+│   │   │   ├── parser.py
+│   │   │   ├── clauses.py
+│   │   │   ├── entities.py
+│   │   │   ├── concepts.py
+│   │   │   └── relationships.py
+│   │   │
+│   │   ├── models/
+│   │   ├── schemas/
+│   │   └── config.py
 │   │
-│   ├── graph/
-│   │   ├── queries.py
-│   │   ├── lineage.py
-│   │   ├── supersession.py
+│   ├── evaluation/
+│   │   ├── dataset.json
+│   │   ├── retrieval.py
+│   │   ├── citations.py
+│   │   ├── temporal.py
 │   │   └── contradictions.py
 │   │
-│   ├── retrieval/
-│   │   ├── vector.py
-│   │   ├── graph.py
-│   │   ├── hybrid.py
-│   │   └── reranker.py
-│   │
-│   ├── pipeline/
-│   │   ├── pipeline.py
-│   │   ├── state.py
-│   │   └── stages/
-│   │
-│   ├── agents/
-│   │   ├── models.py          # Strands model provider factory/registry
-│   │   ├── query_agent.py     # query understanding (Strands Agent)
-│   │   └── answer_agent.py    # grounded answer generation (Strands Agent)
-│   │
-│   ├── ingestion/
-│   │   ├── loaders/
-│   │   ├── parser.py
-│   │   ├── clauses.py
-│   │   ├── entities.py
-│   │   ├── concepts.py
-│   │   └── relationships.py
-│   │
-│   ├── models/
-│   ├── schemas/
-│   └── config.py
+│   ├── tests/
+│   ├── scripts/
+│   ├── Dockerfile
+│   ├── pyproject.toml
+│   ├── uv.lock
+│   └── README.md
 │
-├── evaluation/
-│   ├── dataset.json
-│   ├── retrieval.py
-│   ├── citations.py
-│   ├── temporal.py
-│   └── contradictions.py
+├── web/
+│   └── README.md              # placeholder until a frontend stack is chosen
 │
-├── tests/
+├── docs/
+│   ├── PRD.md
+│   ├── ARCHITECTURE.md
+│   ├── DATA_MODEL.md
+│   ├── CODING_STANDARDS.md
+│   └── decisions/
 │
-├── scripts/
-│
-├── docker/
-│
+├── .github/workflows/
 ├── docker-compose.yml
-├── Dockerfile
-├── pyproject.toml
+├── .env.example
+├── AGENTS.md
 └── README.md
 ```
 
@@ -2284,7 +2300,7 @@ Storage rules:
 
 ## 70.3 Model factory
 
-`app/agents/models.py` resolves an authenticated caller's `(provider, model_id)` request into a Strands model object by looking up and decrypting that caller's stored credential:
+`api/app/agents/models.py` resolves an authenticated caller's `(provider, model_id)` request into a Strands model object by looking up and decrypting that caller's stored credential:
 
 ```python
 from strands.models.anthropic import AnthropicModel

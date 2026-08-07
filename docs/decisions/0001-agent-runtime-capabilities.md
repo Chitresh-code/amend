@@ -55,5 +55,5 @@ The governing constraint throughout is [ARCHITECTURE.md §2](../ARCHITECTURE.md#
 
 - New tables: `conversations`, `conversation_turns` (DATA_MODEL.md).
 - `POST /v1/query` gains an optional `conversation_id` (PRD §71); an SSE variant is additive.
-- `app/agents/` gains hook-based telemetry wiring, distinct from pipeline logic.
+- `api/app/agents/` gains hook-based telemetry wiring, distinct from pipeline logic.
 - No change to the deterministic pipeline's control flow: this ADR reinforces §2's decision rather than revisiting it.

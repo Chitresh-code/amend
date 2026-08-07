@@ -1,7 +1,5 @@
-"""Environment smoke test: no application code exists yet (PRD §64 Phase 1),
-so this only verifies the declared runtime and dependencies actually install
-and import, per docs/CODING_STANDARDS.md's rule that non-trivial setup ships
-with a check.
+"""Environment smoke test: no application code exists yet, so this only
+verifies the declared runtime and dependencies actually install and import.
 """
 
 import sys
