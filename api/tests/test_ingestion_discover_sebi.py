@@ -34,3 +34,13 @@ def test_resolve_pdf_url_extracts_iframe_target():
     assert pdf_url is not None
     assert pdf_url.startswith("https://www.sebi.gov.in/sebi_data/attachdocs/")
     assert pdf_url.endswith(".pdf")
+
+
+def test_resolve_pdf_url_resolves_relative_iframe_target():
+    # Older (pre-~2011) landing pages embed a relative path, not an absolute
+    # URL - confirmed live: this used to make the fetcher reject it as
+    # "not on the allowlist" since a relative URL parses to no hostname at all.
+    pdf_url = resolve_pdf_url(_load("sebi_landing_page_relative_url.html"))
+    assert pdf_url is not None
+    assert pdf_url.startswith("https://www.sebi.gov.in/sebi_data/attachdocs/")
+    assert pdf_url.endswith(".pdf")

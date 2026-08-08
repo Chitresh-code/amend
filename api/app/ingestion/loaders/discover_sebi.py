@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -6,6 +7,7 @@ from bs4 import BeautifulSoup
 from app.ingestion.loaders.discovery import DiscoveredDocument
 from app.ingestion.loaders.fetch import USER_AGENT
 
+BASE_URL = "https://www.sebi.gov.in"
 LISTING_URL = "https://www.sebi.gov.in/sebiweb/home/HomeAction.do"
 AJAX_URL = "https://www.sebi.gov.in/sebiweb/ajax/home/getnewslistinfo.jsp"
 # sid/ssid/smid identify the "Legal > Master Circulars" section in SEBI's site nav.
@@ -95,4 +97,8 @@ def discover_sebi(client: httpx.Client | None = None) -> list[DiscoveredDocument
 
 def resolve_pdf_url(landing_page_html: str) -> str | None:
     match = _IFRAME_FILE_RE.search(landing_page_html)
-    return match.group(1) if match else None
+    if match is None:
+        return None
+    # Older pages (pre-~2011) embed a relative path here; newer ones an absolute
+    # URL. urljoin resolves both correctly, returning an absolute URL either way.
+    return urljoin(BASE_URL, str(match.group(1)))

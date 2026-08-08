@@ -1,4 +1,6 @@
 import hashlib
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -19,6 +21,27 @@ USER_AGENT = (
 
 class FetchError(Exception):
     pass
+
+
+_TRANSIENT_RETRY_ATTEMPTS = 3
+_TRANSIENT_RETRY_DELAY_SECONDS = 1.0
+
+
+def _with_retries[T](fn: Callable[[], T]) -> T:
+    # Confirmed against the live SEBI site: a handful of documents in a ~500-doc
+    # run hit a transient "peer closed connection" (httpx.RemoteProtocolError,
+    # a TransportError subclass). Not retried: HTTPStatusError (a real 4xx/5xx),
+    # which no amount of retrying fixes.
+    last_exc: httpx.TransportError | None = None
+    for attempt in range(_TRANSIENT_RETRY_ATTEMPTS):
+        try:
+            return fn()
+        except httpx.TransportError as exc:
+            last_exc = exc
+            if attempt < _TRANSIENT_RETRY_ATTEMPTS - 1:
+                time.sleep(_TRANSIENT_RETRY_DELAY_SECONDS * (attempt + 1))
+    assert last_exc is not None
+    raise last_exc
 
 
 @dataclass(frozen=True)
@@ -118,7 +141,7 @@ def fetch_html(url: str, *, client: httpx.Client | None = None) -> str:
         event_hooks={"response": [_check_host]},
     )
     try:
-        response = client.get(url)
+        response = _with_retries(lambda: client.get(url))
         response.raise_for_status()
         return response.text
     except httpx.HTTPError as exc:
@@ -143,7 +166,7 @@ def fetch_document(
     )
     try:
         try:
-            content = _fetch_via_httpx(url, client)
+            content = _with_retries(lambda: _fetch_via_httpx(url, client))
         except httpx.HTTPError as exc:
             raise FetchError(f"failed to fetch {url}: {exc}") from exc
 
