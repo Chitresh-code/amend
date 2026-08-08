@@ -14,3 +14,11 @@ uv run pytest
 ```
 
 Run the full stack (this service plus Postgres, Neo4j, Redis) from the repository root: `docker compose up`.
+
+## Ingestion
+
+The ingestion worker (`python -m app.ingestion`, also `docker-compose.yml`'s `worker` service) needs a Chromium binary for the RBI document fetch path (see `app/ingestion/loaders/fetch.py`), a one-time local setup step:
+
+```bash
+uv run playwright install chromium
+```
