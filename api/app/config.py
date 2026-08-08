@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     ingestion_embedding_model_id: str = ""
     ingestion_embedding_api_key: str = ""
 
+    ingestion_url_allowlist: str = "rbi.org.in,sebi.gov.in"
+    ingestion_max_document_size_bytes: int = 20_000_000
+    # ponytail: fixed delay, not adaptive backoff; revisit if a real run gets rate-limited.
+    ingestion_request_delay_seconds: float = 1.0
+
     rate_limit_requests_per_minute: int = 60
     rate_limit_burst: int = 20
 
@@ -58,6 +63,10 @@ class Settings(BaseSettings):
     @property
     def enabled_model_providers_list(self) -> list[str]:
         return [p.strip() for p in self.enabled_model_providers.split(",") if p.strip()]
+
+    @property
+    def ingestion_url_allowlist_list(self) -> list[str]:
+        return [d.strip() for d in self.ingestion_url_allowlist.split(",") if d.strip()]
 
     @property
     def cors_allowed_origins_list(self) -> list[str]:
