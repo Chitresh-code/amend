@@ -121,6 +121,7 @@ CREATE TABLE api_keys (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL REFERENCES users(id),
     key_hash    TEXT NOT NULL UNIQUE,   -- HMAC(API_KEY_HASH_PEPPER, issued key), never the raw key
+    key_suffix  TEXT NOT NULL,          -- last 4 chars of the raw key, captured at issuance, for display only
     label       TEXT NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at  TIMESTAMPTZ
