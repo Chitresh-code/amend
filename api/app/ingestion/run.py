@@ -1,3 +1,4 @@
+import logging
 import time
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -10,8 +11,10 @@ from app.ingestion.clauses import segment_clauses
 from app.ingestion.ids import generate_clause_id, generate_document_id
 from app.ingestion.loaders import discover_rbi, discover_sebi
 from app.ingestion.loaders.discovery import DiscoveredDocument
-from app.ingestion.loaders.fetch import FetchError, fetch_document, fetch_html
+from app.ingestion.loaders.fetch import fetch_document, fetch_html
 from app.ingestion.parser import parse_pdf
+
+logger = logging.getLogger(__name__)
 
 PARSER_VERSION = "1.0.0"
 INGESTION_VERSION = "1.0.0"
@@ -139,7 +142,7 @@ def _replace_clauses(conn: psycopg.Connection, document_id: str, content: bytes)
 
 
 def _ingest_one(conn: psycopg.Connection, doc: DiscoveredDocument, browser: Browser) -> str:
-    """Returns 'succeeded' or 'skipped'; raises FetchError/RuntimeError on failure."""
+    """Returns 'succeeded' or 'skipped'; raises on failure (caller records and continues)."""
     landing_html = fetch_html(doc.landing_url)
     pdf_url = _RESOLVERS[doc.regulator](landing_html)
     if pdf_url is None:
@@ -194,11 +197,21 @@ def run(conn: psycopg.Connection, *, regulators: tuple[str, ...] = ("RBI", "SEBI
                         summary.succeeded += 1
                     else:
                         summary.skipped += 1
-                except (FetchError, RuntimeError) as exc:
-                    document_id = generate_document_id(
-                        doc.regulator, doc.landing_url, doc.landing_url
-                    )
-                    _record_state(conn, document_id, "failed", None, error=str(exc))
+                except Exception as exc:
+                    # A single document's failure - network timeout, a bad PDF, a
+                    # DB constraint - must never abort the rest of a ~500-document
+                    # run. Recording the failure is itself best-effort: if even
+                    # that raises, log and move on rather than propagate.
+                    logger.warning("ingestion failed for %s: %s", doc.landing_url, exc)
+                    try:
+                        document_id = generate_document_id(
+                            doc.regulator, doc.landing_url, doc.landing_url
+                        )
+                        _record_state(conn, document_id, "failed", None, error=str(exc)[:2000])
+                    except Exception:
+                        logger.exception(
+                            "also failed to record failure state for %s", doc.landing_url
+                        )
                     summary.failed += 1
 
                 if i < len(discovered) - 1:

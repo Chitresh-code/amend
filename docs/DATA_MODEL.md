@@ -158,7 +158,7 @@ CREATE UNIQUE INDEX idx_model_credentials_one_default
 
 ```sql
 CREATE TABLE ingestion_state (
-    document_id      TEXT PRIMARY KEY REFERENCES documents(document_id),
+    document_id      TEXT PRIMARY KEY,
     stage             TEXT NOT NULL,   -- fetch, parse, segment, extract, embed, graph_write
     status            TEXT NOT NULL,   -- pending, succeeded, failed
     last_run_at       TIMESTAMPTZ,
@@ -166,6 +166,8 @@ CREATE TABLE ingestion_state (
     checksum_at_run   TEXT             -- detects source drift on re-ingestion (PRD §11)
 );
 ```
+
+Deliberately not a foreign key to `documents`: a failed `fetch` attempt has no `documents` row yet (`source_checksum`/`retrieved_at` there are `NOT NULL` and only exist once a fetch succeeds), so `ingestion_state` must be able to record a failure for a `document_id` `documents` has never seen.
 
 ### 1.7 `query_telemetry` (PRD §52)
 
