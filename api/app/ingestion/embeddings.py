@@ -3,7 +3,11 @@ from collections.abc import Callable
 
 import httpx
 
-OPENAI_EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings"
+# base_url matches the OpenAI SDK's own convention (the API root, not the full
+# endpoint) so the same value works for OpenAI itself, OpenRouter
+# ("https://openrouter.ai/api/v1", model_id "openai/text-embedding-3-large"),
+# Azure OpenAI, or a self-hosted OpenAI-compatible proxy.
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 # ponytail: char-based approximation of OpenAI's per-input (8,192 token) and
 # per-request (300,000 token) caps, ~4 chars/token, not a real tokenizer. Real
@@ -45,6 +49,7 @@ def _embed_openai(
     api_key: str,
     client: httpx.Client,
     dimensions: int | None,
+    base_url: str | None,
 ) -> list[list[float]]:
     truncated = [t[:_MAX_INPUT_CHARS] for t in texts]
     payload: dict[str, object] = {"model": model_id, "input": truncated}
@@ -53,7 +58,7 @@ def _embed_openai(
 
     def _post() -> httpx.Response:
         response = client.post(
-            OPENAI_EMBEDDINGS_URL,
+            f"{base_url or DEFAULT_OPENAI_BASE_URL}/embeddings",
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,
         )
@@ -66,7 +71,8 @@ def _embed_openai(
 
 
 _PROVIDERS: dict[
-    str, Callable[[list[str], str, str, httpx.Client, int | None], list[list[float]]]
+    str,
+    Callable[[list[str], str, str, httpx.Client, int | None, str | None], list[list[float]]],
 ] = {
     "openai": _embed_openai,
 }
@@ -97,6 +103,7 @@ def embed_batch(
     model_id: str,
     api_key: str,
     dimensions: int | None = None,
+    base_url: str | None = None,
     client: httpx.Client | None = None,
 ) -> list[list[float]]:
     if provider not in _PROVIDERS:
@@ -109,7 +116,9 @@ def embed_batch(
     try:
         results: list[list[float]] = []
         for chunk in _chunk_by_budget(texts):
-            results.extend(_PROVIDERS[provider](chunk, model_id, api_key, client, dimensions))
+            results.extend(
+                _PROVIDERS[provider](chunk, model_id, api_key, client, dimensions, base_url)
+            )
         return results
     finally:
         if owns_client:

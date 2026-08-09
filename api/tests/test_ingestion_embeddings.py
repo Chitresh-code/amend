@@ -3,7 +3,12 @@ import json
 import httpx
 import pytest
 
-from app.ingestion.embeddings import EmbeddingError, _chunk_by_budget, embed_batch
+from app.ingestion.embeddings import (
+    DEFAULT_OPENAI_BASE_URL,
+    EmbeddingError,
+    _chunk_by_budget,
+    embed_batch,
+)
 
 
 def _client(handler) -> httpx.Client:
@@ -131,3 +136,35 @@ def test_embed_batch_omits_dimensions_when_not_given():
 
     embed_batch(["x"], provider="openai", model_id="m", api_key="k", client=_client(handler))
     assert "dimensions" not in seen_payloads[0]
+
+
+def test_embed_batch_uses_default_base_url_when_not_given():
+    seen_urls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        return httpx.Response(200, json={"data": [{"embedding": [0.0]}]})
+
+    embed_batch(["x"], provider="openai", model_id="m", api_key="k", client=_client(handler))
+    assert seen_urls == [f"{DEFAULT_OPENAI_BASE_URL}/embeddings"]
+
+
+def test_embed_batch_routes_to_custom_base_url():
+    seen_urls = []
+    seen_models = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        seen_models.append(json.loads(request.read())["model"])
+        return httpx.Response(200, json={"data": [{"embedding": [0.0]}]})
+
+    embed_batch(
+        ["x"],
+        provider="openai",
+        model_id="openai/text-embedding-3-large",
+        api_key="k",
+        base_url="https://openrouter.ai/api/v1",
+        client=_client(handler),
+    )
+    assert seen_urls == ["https://openrouter.ai/api/v1/embeddings"]
+    assert seen_models == ["openai/text-embedding-3-large"]

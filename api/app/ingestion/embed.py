@@ -90,6 +90,7 @@ def build_index(conn: psycopg.Connection, *, embedding_model_id: str | None = No
                 model_id=settings.ingestion_embedding_model_id,
                 api_key=settings.ingestion_embedding_api_key,
                 dimensions=dimension,
+                base_url=settings.ingestion_embedding_base_url or None,
             )
         except Exception:
             # A failing batch must not abort the whole ~83k-clause run (same
