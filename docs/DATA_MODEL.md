@@ -144,6 +144,7 @@ CREATE TABLE model_credentials (
     model_id       TEXT NOT NULL,
     encrypted_key  BYTEA NOT NULL,      -- Fernet(CREDENTIAL_ENCRYPTION_KEY) ciphertext
     key_suffix     TEXT NOT NULL,       -- last 4 chars, for display only
+    base_url       TEXT,                -- NULL uses provider's own default API host
     is_default     BOOLEAN NOT NULL DEFAULT false,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -155,6 +156,8 @@ CREATE UNIQUE INDEX idx_model_credentials_one_default
 ```
 
 `encrypted_key` is opaque ciphertext; the decryption key (`CREDENTIAL_ENCRYPTION_KEY`) lives only in the deployment's secret store, never in this database. No column here or in `query_telemetry` ever holds a plaintext provider key. `idx_model_credentials_one_default` enforces at most one default credential per user at the database level, not just in application code, matching the pattern already used for `embedding_models.is_default` (§1.3).
+
+`base_url` is not a plaintext secret (it's not a key), so it's stored and returned as-is, unlike `encrypted_key`. It doesn't introduce a new provider: `provider` is still one of `ENABLED_MODEL_PROVIDERS`, and `base_url` only redirects that provider's SDK client to an OpenAI-compatible host other than its own default (PRD §70.3) — for example `provider = 'openai'` with `base_url = 'https://openrouter.ai/api/v1'` routes through OpenRouter.
 
 ### 1.6 `ingestion_state`
 

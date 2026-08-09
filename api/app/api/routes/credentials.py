@@ -35,14 +35,15 @@ async def create_or_update_credential(
         await conn.execute(
             """
             INSERT INTO model_credentials
-                (user_id, provider, model_id, encrypted_key, key_suffix, is_default)
-            VALUES (%s, %s, %s, %s, %s, %s)
+                (user_id, provider, model_id, encrypted_key, key_suffix, base_url, is_default)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id, provider) DO UPDATE SET
                 model_id = EXCLUDED.model_id,
                 encrypted_key = EXCLUDED.encrypted_key,
                 key_suffix = EXCLUDED.key_suffix,
+                base_url = EXCLUDED.base_url,
                 updated_at = now()
-            RETURNING provider, model_id, key_suffix, is_default, created_at
+            RETURNING provider, model_id, key_suffix, base_url, is_default, created_at
             """,
             (
                 caller.user_id,
@@ -50,17 +51,19 @@ async def create_or_update_credential(
                 body.model_id,
                 encrypt_key(body.api_key),
                 key_suffix(body.api_key),
+                body.base_url,
                 is_default,
             ),
         )
     ).fetchone()
     assert row is not None
 
-    provider, model_id, suffix, default_flag, created_at = row
+    provider, model_id, suffix, base_url, default_flag, created_at = row
     return CredentialResponse(
         provider=provider,
         model_id=model_id,
         key_suffix=suffix,
+        base_url=base_url,
         is_default=default_flag,
         created_at=created_at,
     )
@@ -73,7 +76,7 @@ async def list_credentials(
 ) -> list[CredentialResponse]:
     rows = await (
         await conn.execute(
-            "SELECT provider, model_id, key_suffix, is_default, created_at "
+            "SELECT provider, model_id, key_suffix, base_url, is_default, created_at "
             "FROM model_credentials WHERE user_id = %s ORDER BY created_at",
             (caller.user_id,),
         )
@@ -83,10 +86,11 @@ async def list_credentials(
             provider=provider,
             model_id=model_id,
             key_suffix=suffix,
+            base_url=base_url,
             is_default=is_default,
             created_at=created_at,
         )
-        for provider, model_id, suffix, is_default, created_at in rows
+        for provider, model_id, suffix, base_url, is_default, created_at in rows
     ]
 
 
@@ -110,7 +114,7 @@ async def set_default_credential(
                 """
                 UPDATE model_credentials SET is_default = true, updated_at = now()
                 WHERE user_id = %s AND provider = %s
-                RETURNING provider, model_id, key_suffix, is_default, created_at
+                RETURNING provider, model_id, key_suffix, base_url, is_default, created_at
                 """,
                 (caller.user_id, provider),
             )
@@ -119,11 +123,12 @@ async def set_default_credential(
     if row is None:
         raise HTTPException(status_code=404, detail="Credential not found")
 
-    provider_out, model_id, suffix, is_default, created_at = row
+    provider_out, model_id, suffix, base_url, is_default, created_at = row
     return CredentialResponse(
         provider=provider_out,
         model_id=model_id,
         key_suffix=suffix,
+        base_url=base_url,
         is_default=is_default,
         created_at=created_at,
     )

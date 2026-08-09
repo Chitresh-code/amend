@@ -37,11 +37,58 @@ def test_create_and_list_credential(client, seed_user):
     assert body["is_default"] is True
     assert "api_key" not in body
 
+    assert body["base_url"] is None
+
     list_resp = client.get("/v1/credentials")
     assert list_resp.status_code == 200
     listed = list_resp.json()
     assert len(listed) == 1
     assert listed[0]["provider"] == "anthropic"
+    assert listed[0]["base_url"] is None
+
+
+def test_create_credential_with_custom_base_url(client, seed_user):
+    headers = _login(client, seed_user)
+
+    resp = client.post(
+        "/v1/credentials",
+        json={
+            "provider": "openai",
+            "model_id": "openai/gpt-5",
+            "api_key": "sk-or-abcd",
+            "base_url": "https://openrouter.ai/api/v1",
+        },
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["base_url"] == "https://openrouter.ai/api/v1"
+
+    listed = client.get("/v1/credentials").json()
+    assert listed[0]["base_url"] == "https://openrouter.ai/api/v1"
+
+
+def test_updating_credential_replaces_base_url(client, seed_user):
+    headers = _login(client, seed_user)
+    client.post(
+        "/v1/credentials",
+        json={
+            "provider": "openai",
+            "model_id": "openai/gpt-5",
+            "api_key": "sk-or-abcd",
+            "base_url": "https://openrouter.ai/api/v1",
+        },
+        headers=headers,
+    )
+
+    resp = client.post(
+        "/v1/credentials",
+        json={"provider": "openai", "model_id": "gpt-5", "api_key": "sk-oai-abcd"},
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["base_url"] is None
 
 
 def test_second_credential_is_not_default(client, seed_user):
