@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     ingestion_embedding_provider: str = ""
     ingestion_embedding_model_id: str = ""
     ingestion_embedding_api_key: str = ""
+    # Empty means the provider's own default host (e.g. OpenAI's own API).
+    # Set to an OpenAI-compatible host - OpenRouter (openai/text-embedding-3-large),
+    # Azure OpenAI, a self-hosted vLLM/LiteLLM proxy - to route embedding calls there.
+    ingestion_embedding_base_url: str = ""
 
     ingestion_url_allowlist: str = "rbi.org.in,sebi.gov.in"
     ingestion_max_document_size_bytes: int = 20_000_000

@@ -89,6 +89,8 @@ CREATE INDEX idx_emb_openai_3_large_hnsw
     USING hnsw (embedding vector_cosine_ops);
 ```
 
+`dimension` here is 1536, not `text-embedding-3-large`'s native 3072: pgvector's `hnsw` index rejects columns over 2000 dimensions, so ingestion requests a shortened embedding via OpenAI's `dimensions` parameter (a trained reduction, not naive truncation) rather than skipping the index.
+
 The ingestion worker writes to whichever table `INGESTION_EMBEDDING_PROVIDER`/`INGESTION_EMBEDDING_MODEL_ID` resolves to via `embedding_models.table_name`. The query path (§20) embeds the caller's question with the same model, per the `retrieval.embedding_model_id` request field in PRD §70.4, and searches only that table.
 
 ### 1.4 `users`, `user_sessions`, and `api_keys` (PRD §72)
