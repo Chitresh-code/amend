@@ -2312,6 +2312,19 @@ Request:
 
 `model_id` must be one of the provider's known model IDs (`GET /v1/models`). A credential is scoped to `(user_id, provider)`, not `(user_id, provider, model_id)` (§1.5's `UNIQUE (user_id, provider)`): submitting a new `model_id` for a provider that already has a credential updates that credential's `model_id` and key rather than creating a second row, since a caller has exactly one stored key per provider.
 
+`base_url` is optional and routes `provider`'s calls to an OpenAI-compatible host other than that provider's own default, for example OpenRouter:
+
+```json
+{
+  "provider": "openai",
+  "model_id": "openai/gpt-5",
+  "api_key": "sk-or-...",
+  "base_url": "https://openrouter.ai/api/v1"
+}
+```
+
+This is not a new provider: `provider` stays one of the values in `ENABLED_MODEL_PROVIDERS`, and `base_url` only changes which host `client_args` points the underlying SDK client at (§70.3). Omitting it uses `provider`'s own default API host.
+
 Response (the key is never echoed back):
 
 ```json
@@ -2320,6 +2333,7 @@ Response (the key is never echoed back):
   "model_id": "claude-sonnet-4-5",
   "configured": true,
   "key_suffix": "...wxyz",
+  "base_url": null,
   "created_at": "2026-08-07T00:00:00Z"
 }
 ```
@@ -2332,7 +2346,7 @@ Lists the authenticated caller's configured credentials (never the key itself):
 
 ```json
 [
-  { "provider": "anthropic", "model_id": "claude-sonnet-4-5", "key_suffix": "8k2p", "is_default": true, "created_at": "2026-08-07T00:00:00Z" }
+  { "provider": "anthropic", "model_id": "claude-sonnet-4-5", "key_suffix": "8k2p", "base_url": null, "is_default": true, "created_at": "2026-08-07T00:00:00Z" }
 ]
 ```
 
@@ -2363,23 +2377,21 @@ Storage rules:
 from strands.models.anthropic import AnthropicModel
 from strands.models.openai import OpenAIModel
 
-def build_model(provider: str, model_id: str, api_key: str, params: dict | None = None):
+def build_model(
+    provider: str, model_id: str, api_key: str, base_url: str | None = None,
+    params: dict | None = None,
+):
+    client_args = {"api_key": api_key}
+    if base_url:
+        client_args["base_url"] = base_url
     if provider == "anthropic":
-        return AnthropicModel(
-            client_args={"api_key": api_key},
-            model_id=model_id,
-            params=params or {},
-        )
+        return AnthropicModel(client_args=client_args, model_id=model_id, params=params or {})
     if provider == "openai":
-        return OpenAIModel(
-            client_args={"api_key": api_key},
-            model_id=model_id,
-            params=params or {},
-        )
+        return OpenAIModel(client_args=client_args, model_id=model_id, params=params or {})
     raise UnsupportedProviderError(provider)
 ```
 
-`api_key` here is the caller's decrypted credential, resolved just before this call and not retained beyond the request. The `query_agent` and `answer_agent` (§25) are constructed per request with the resolved model, keeping the rest of the pipeline provider-agnostic.
+`api_key` here is the caller's decrypted credential, resolved just before this call and not retained beyond the request. `base_url`, when the caller's stored credential has one (§70.2), routes the underlying SDK client at an OpenAI-compatible host other than that provider's default (OpenRouter, Azure OpenAI, a self-hosted proxy) — Strands' `OpenAIModel` explicitly supports "any OpenAI or OpenAI-compatible model" via this mechanism. The `query_agent` and `answer_agent` (§25) are constructed per request with the resolved model, keeping the rest of the pipeline provider-agnostic.
 
 ## 70.4 Embedding model pluggability
 
