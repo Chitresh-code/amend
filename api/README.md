@@ -22,3 +22,5 @@ The ingestion worker (`python -m app.ingestion`, also `docker-compose.yml`'s `wo
 ```bash
 uv run playwright install chromium
 ```
+
+After the corpus is ingested, `python -m app.ingestion.embed` builds the embedding index registered by migration `0010` (`openai:text-embedding-3-large`), embedding every clause that isn't already in `clause_embeddings_openai_text_embedding_3_large` and flipping it to `ready` once complete. Needs a real `INGESTION_EMBEDDING_API_KEY` in `.env`; safe to re-run (only embeds clauses not already indexed).

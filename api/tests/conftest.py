@@ -31,7 +31,8 @@ def db_conn():
 def clean_state(db_conn):
     db_conn.execute(
         "TRUNCATE TABLE conversations, model_credentials, api_keys, user_sessions, users, "
-        "embedding_models, clauses, ingestion_state, documents RESTART IDENTITY CASCADE"
+        "clause_embeddings_openai_text_embedding_3_large, embedding_models, clauses, "
+        "ingestion_state, documents RESTART IDENTITY CASCADE"
     )
     sync_redis.from_url(settings.redis_url).flushdb()
     yield
