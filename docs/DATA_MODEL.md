@@ -26,9 +26,12 @@ CREATE TABLE documents (
 
 CREATE INDEX idx_documents_regulator_type ON documents (regulator, document_type);
 CREATE INDEX idx_documents_effective_date ON documents (effective_date);
+CREATE INDEX idx_documents_reference_number ON documents (reference_number);
 ```
 
 `regulator` is a plain `CHECK` constraint, not a lookup table: the MVP corpus (PRD §9) has exactly two values, and a lookup table would add a join for no behavioral benefit. Widen the `CHECK` when a third regulator (PRD §66) is added.
+
+`reference_number` is populated at ingestion time from each document's own page-1 header text, and `idx_documents_reference_number` is what the document-level lineage relationship resolution (§2.2) looks it up by; not unique, since malformed or duplicate extraction shouldn't be able to fail ingestion via a constraint violation.
 
 ### 1.2 `clauses`
 
