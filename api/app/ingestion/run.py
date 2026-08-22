@@ -4,10 +4,13 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 import psycopg
+from neo4j import Driver
 from playwright.sync_api import Browser, sync_playwright
 
 from app.config import settings
+from app.graph.db import get_driver
 from app.ingestion.clauses import segment_clauses
+from app.ingestion.graph_writer import ClauseRecord, write_document_graph
 from app.ingestion.ids import generate_clause_id, generate_document_id
 from app.ingestion.loaders import discover_rbi, discover_sebi
 from app.ingestion.loaders.discovery import DiscoveredDocument
@@ -58,12 +61,16 @@ def _record_state(
     checksum: str | None,
     error: str | None = None,
 ) -> None:
+    # 'graph_write' is the last stage the pipeline reaches today (fetch -> parse
+    # -> segment -> graph_write; see ingestion_state's stage column comment).
+    # A row's stage always names the furthest stage reached, not a full history.
     conn.execute(
         """
         INSERT INTO ingestion_state
             (document_id, stage, status, last_run_at, last_error, checksum_at_run)
-        VALUES (%s, 'segment', %s, now(), %s, %s)
+        VALUES (%s, 'graph_write', %s, now(), %s, %s)
         ON CONFLICT (document_id) DO UPDATE SET
+            stage = EXCLUDED.stage,
             status = EXCLUDED.status,
             last_run_at = EXCLUDED.last_run_at,
             last_error = EXCLUDED.last_error,
@@ -115,7 +122,9 @@ def _upsert_document(
     )
 
 
-def _replace_clauses(conn: psycopg.Connection, document_id: str, content: bytes) -> None:
+def _replace_clauses(
+    conn: psycopg.Connection, document_id: str, content: bytes
+) -> list[ClauseRecord]:
     raw_clauses = segment_clauses(parse_pdf(content))
     clause_ids = [generate_clause_id(document_id, i) for i in range(len(raw_clauses))]
 
@@ -140,8 +149,21 @@ def _replace_clauses(conn: psycopg.Connection, document_id: str, content: bytes)
             ),
         )
 
+    return [
+        ClauseRecord(
+            clause_id=clause_ids[i],
+            clause_number=clause.clause_number,
+            heading=clause.heading,
+            text=clause.text,
+            page_number=clause.page_number,
+        )
+        for i, clause in enumerate(raw_clauses)
+    ]
 
-def _ingest_one(conn: psycopg.Connection, doc: DiscoveredDocument, browser: Browser) -> str:
+
+def _ingest_one(
+    conn: psycopg.Connection, doc: DiscoveredDocument, browser: Browser, driver: Driver
+) -> str:
     """Returns 'succeeded' or 'skipped'; raises on failure (caller records and continues)."""
     landing_html = fetch_html(doc.landing_url)
     pdf_url = _RESOLVERS[doc.regulator](landing_html)
@@ -154,6 +176,8 @@ def _ingest_one(conn: psycopg.Connection, doc: DiscoveredDocument, browser: Brow
     if _already_succeeded(conn, document_id, fetched.checksum):
         return "skipped"
 
+    publication_date = _parse_date(doc.publication_date_text)
+
     with conn.transaction():
         _upsert_document(
             conn,
@@ -161,13 +185,30 @@ def _ingest_one(conn: psycopg.Connection, doc: DiscoveredDocument, browser: Brow
             regulator=doc.regulator,
             document_type=doc.document_type,
             title=doc.title,
-            publication_date=_parse_date(doc.publication_date_text),
+            publication_date=publication_date,
             source_url=pdf_url,
             checksum=fetched.checksum,
             retrieved_at=fetched.retrieved_at,
         )
-        _replace_clauses(conn, document_id, fetched.content)
-        _record_state(conn, document_id, "succeeded", fetched.checksum)
+        clauses = _replace_clauses(conn, document_id, fetched.content)
+
+    # Postgres is committed at this point; a failure here (caught by run()'s
+    # per-document handler below) leaves ingestion_state without a 'succeeded'
+    # row, so the next run retries both the Postgres write (idempotent) and
+    # this graph write, rather than needing separate per-stage tracking.
+    write_document_graph(
+        driver,
+        document_id=document_id,
+        regulator=doc.regulator,
+        document_type=doc.document_type,
+        title=doc.title,
+        publication_date=publication_date,
+        source_url=pdf_url,
+        checksum=fetched.checksum,
+        clauses=clauses,
+    )
+
+    _record_state(conn, document_id, "succeeded", fetched.checksum)
 
     return "succeeded"
 
@@ -184,39 +225,43 @@ def run(conn: psycopg.Connection, *, regulators: tuple[str, ...] = ("RBI", "SEBI
         discovered.extend(discover_sebi.discover_sebi())
 
     summary = RunSummary()
-    # One browser for the whole run, reused across every document that needs the
-    # bot-mitigation fallback (see loaders/fetch.py) - launching fresh per document
-    # would mean hundreds of browser startups for a full corpus run.
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        try:
-            for i, doc in enumerate(discovered):
-                try:
-                    result = _ingest_one(conn, doc, browser)
-                    if result == "succeeded":
-                        summary.succeeded += 1
-                    else:
-                        summary.skipped += 1
-                except Exception as exc:
-                    # A single document's failure - network timeout, a bad PDF, a
-                    # DB constraint - must never abort the rest of a ~500-document
-                    # run. Recording the failure is itself best-effort: if even
-                    # that raises, log and move on rather than propagate.
-                    logger.warning("ingestion failed for %s: %s", doc.landing_url, exc)
+    # One browser and one graph driver for the whole run, reused across every
+    # document - matches the existing rationale for a single Playwright
+    # browser instance (avoids hundreds of startups for a full corpus run).
+    driver = get_driver()
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                for i, doc in enumerate(discovered):
                     try:
-                        document_id = generate_document_id(
-                            doc.regulator, doc.landing_url, doc.landing_url
-                        )
-                        _record_state(conn, document_id, "failed", None, error=str(exc)[:2000])
-                    except Exception:
-                        logger.exception(
-                            "also failed to record failure state for %s", doc.landing_url
-                        )
-                    summary.failed += 1
+                        result = _ingest_one(conn, doc, browser, driver)
+                        if result == "succeeded":
+                            summary.succeeded += 1
+                        else:
+                            summary.skipped += 1
+                    except Exception as exc:
+                        # A single document's failure - network timeout, a bad PDF, a
+                        # DB constraint - must never abort the rest of a ~500-document
+                        # run. Recording the failure is itself best-effort: if even
+                        # that raises, log and move on rather than propagate.
+                        logger.warning("ingestion failed for %s: %s", doc.landing_url, exc)
+                        try:
+                            document_id = generate_document_id(
+                                doc.regulator, doc.landing_url, doc.landing_url
+                            )
+                            _record_state(conn, document_id, "failed", None, error=str(exc)[:2000])
+                        except Exception:
+                            logger.exception(
+                                "also failed to record failure state for %s", doc.landing_url
+                            )
+                        summary.failed += 1
 
-                if i < len(discovered) - 1:
-                    time.sleep(settings.ingestion_request_delay_seconds)
-        finally:
-            browser.close()
+                    if i < len(discovered) - 1:
+                        time.sleep(settings.ingestion_request_delay_seconds)
+            finally:
+                browser.close()
+    finally:
+        driver.close()
 
     return summary

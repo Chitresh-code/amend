@@ -1,6 +1,3 @@
-# No Neo4j service container yet: no code exercises it. Add it here when
-# that lands.
-#
 # The "test" job runs unconditionally (no path filtering) even though this is
 # a monorepo with api/ and web/: main's branch protection requires it on
 # every PR, and a path-filtered job doesn't report a status at all when
@@ -46,6 +43,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      neo4j:
+        image: neo4j:5-community
+        env:
+          # Neo4j requires the admin username to be exactly "neo4j" and the
+          # password to be 8+ characters; the container refuses to start otherwise.
+          NEO4J_AUTH: neo4j/test-password
+        ports:
+          - 57687:7687
+        options: >-
+          --health-cmd "wget -q --spider http://localhost:7474 || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 55432
@@ -53,8 +63,9 @@ jobs:
       POSTGRES_USER: amend
       POSTGRES_PASSWORD: amend_test_pw
       REDIS_URL: redis://localhost:56379/0
-      NEO4J_USER: test
-      NEO4J_PASSWORD: test
+      NEO4J_URI: bolt://localhost:57687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: test-password
       CREDENTIAL_ENCRYPTION_KEY: vv6HWttTtvs2bfSm_H_Gzh1ACRme1jRUr-wtUldclSs=
       API_KEY_HASH_PEPPER: ci-api-key-pepper
       SESSION_TOKEN_PEPPER: ci-session-pepper
@@ -81,6 +92,9 @@ jobs:
 
       - name: Apply migrations
         run: uv run python scripts/migrate.py
+
+      - name: Apply graph schema
+        run: uv run python scripts/migrate_graph.py
 
       - name: Test (pytest)
         run: uv run pytest
