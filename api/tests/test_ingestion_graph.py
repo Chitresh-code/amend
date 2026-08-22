@@ -1,6 +1,11 @@
 from datetime import date
 
-from app.ingestion.graph_writer import ClauseRecord, write_document_graph
+from app.ingestion.graph_writer import (
+    ClauseRecord,
+    DocumentRelationship,
+    write_document_graph,
+    write_document_relationships,
+)
 
 
 def _write(driver, document_id: str, clauses: list[ClauseRecord], *, regulator: str = "RBI"):
@@ -10,6 +15,7 @@ def _write(driver, document_id: str, clauses: list[ClauseRecord], *, regulator: 
         regulator=regulator,
         document_type="master_direction",
         title="Test document",
+        reference_number=None,
         publication_date=date(2024, 1, 15),
         source_url="https://rbidocs.rbi.org.in/rdocs/notification/PDFs/test.PDF",
         checksum="deadbeef",
@@ -106,3 +112,69 @@ def test_documents_from_same_regulator_share_regulator_node(neo4j_driver):
             "MATCH (:Regulator {name: 'RBI'})-[:ISSUES]->(d:Document) RETURN count(d) AS n"
         ).single()["n"]
         assert issued_count == 2
+
+
+def test_write_document_relationships_creates_edge_with_provenance(neo4j_driver):
+    _write(neo4j_driver, "rbi:source-1", [])
+    _write(neo4j_driver, "rbi:target-1", [])
+
+    write_document_relationships(
+        neo4j_driver,
+        source_document_id="rbi:source-1",
+        relationships=[
+            DocumentRelationship(
+                relationship_type="SUPERSEDES", target_document_id="rbi:target-1", confidence=0.9
+            )
+        ],
+    )
+
+    with neo4j_driver.session() as session:
+        edge = session.run(
+            "MATCH (:Document {document_id: 'rbi:source-1'})-[r:SUPERSEDES]->"
+            "(:Document {document_id: 'rbi:target-1'}) "
+            "RETURN r.extraction_method AS method, r.confidence AS confidence, "
+            "r.review_status AS review_status"
+        ).single()
+        assert edge is not None
+        assert edge["method"] == "explicit_reference"
+        assert edge["confidence"] == 0.9
+        assert edge["review_status"] == "automatic"
+
+
+def test_write_document_relationships_replaces_stale_edges(neo4j_driver):
+    _write(neo4j_driver, "rbi:source-2", [])
+    _write(neo4j_driver, "rbi:target-2a", [])
+    _write(neo4j_driver, "rbi:target-2b", [])
+
+    write_document_relationships(
+        neo4j_driver,
+        source_document_id="rbi:source-2",
+        relationships=[
+            DocumentRelationship(
+                relationship_type="SUPERSEDES",
+                target_document_id="rbi:target-2a",
+                confidence=0.9,
+            )
+        ],
+    )
+    write_document_relationships(
+        neo4j_driver,
+        source_document_id="rbi:source-2",
+        relationships=[
+            DocumentRelationship(
+                relationship_type="AMENDS", target_document_id="rbi:target-2b", confidence=0.85
+            )
+        ],
+    )
+
+    with neo4j_driver.session() as session:
+        stale = session.run(
+            "MATCH (:Document {document_id: 'rbi:source-2'})-[r:SUPERSEDES]->() RETURN r"
+        ).single()
+        assert stale is None
+
+        current = session.run(
+            "MATCH (:Document {document_id: 'rbi:source-2'})-[r:AMENDS]->"
+            "(t:Document) RETURN t.document_id AS target"
+        ).single()
+        assert current["target"] == "rbi:target-2b"

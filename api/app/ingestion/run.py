@@ -10,12 +10,18 @@ from playwright.sync_api import Browser, sync_playwright
 from app.config import settings
 from app.graph.db import get_driver
 from app.ingestion.clauses import segment_clauses
-from app.ingestion.graph_writer import ClauseRecord, write_document_graph
+from app.ingestion.graph_writer import (
+    ClauseRecord,
+    DocumentRelationship,
+    write_document_graph,
+    write_document_relationships,
+)
 from app.ingestion.ids import generate_clause_id, generate_document_id
 from app.ingestion.loaders import discover_rbi, discover_sebi
 from app.ingestion.loaders.discovery import DiscoveredDocument
 from app.ingestion.loaders.fetch import fetch_document, fetch_html
-from app.ingestion.parser import parse_pdf
+from app.ingestion.parser import ParsedPage, parse_pdf
+from app.ingestion.references import extract_reference_number, extract_referenced_documents
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +93,7 @@ def _upsert_document(
     regulator: str,
     document_type: str,
     title: str,
+    reference_number: str | None,
     publication_date: date | None,
     source_url: str,
     checksum: str,
@@ -95,11 +102,13 @@ def _upsert_document(
     conn.execute(
         """
         INSERT INTO documents
-            (document_id, regulator, document_type, title, publication_date,
-             source_url, source_checksum, retrieved_at, parser_version, ingestion_version)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (document_id, regulator, document_type, title, reference_number,
+             publication_date, source_url, source_checksum, retrieved_at,
+             parser_version, ingestion_version)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (document_id) DO UPDATE SET
             title = EXCLUDED.title,
+            reference_number = EXCLUDED.reference_number,
             publication_date = EXCLUDED.publication_date,
             source_url = EXCLUDED.source_url,
             source_checksum = EXCLUDED.source_checksum,
@@ -112,6 +121,7 @@ def _upsert_document(
             regulator,
             document_type,
             title,
+            reference_number,
             publication_date,
             source_url,
             checksum,
@@ -122,10 +132,20 @@ def _upsert_document(
     )
 
 
+def _resolve_reference_number(
+    conn: psycopg.Connection, reference_number: str, exclude_document_id: str
+) -> str | None:
+    row = conn.execute(
+        "SELECT document_id FROM documents WHERE reference_number = %s AND document_id != %s",
+        (reference_number, exclude_document_id),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
 def _replace_clauses(
-    conn: psycopg.Connection, document_id: str, content: bytes
+    conn: psycopg.Connection, document_id: str, pages: list[ParsedPage]
 ) -> list[ClauseRecord]:
-    raw_clauses = segment_clauses(parse_pdf(content))
+    raw_clauses = segment_clauses(pages)
     clause_ids = [generate_clause_id(document_id, i) for i in range(len(raw_clauses))]
 
     conn.execute("DELETE FROM clauses WHERE document_id = %s", (document_id,))
@@ -177,6 +197,8 @@ def _ingest_one(
         return "skipped"
 
     publication_date = _parse_date(doc.publication_date_text)
+    pages = parse_pdf(fetched.content)
+    reference_number = extract_reference_number(pages)
 
     with conn.transaction():
         _upsert_document(
@@ -185,12 +207,13 @@ def _ingest_one(
             regulator=doc.regulator,
             document_type=doc.document_type,
             title=doc.title,
+            reference_number=reference_number,
             publication_date=publication_date,
             source_url=pdf_url,
             checksum=fetched.checksum,
             retrieved_at=fetched.retrieved_at,
         )
-        clauses = _replace_clauses(conn, document_id, fetched.content)
+        clauses = _replace_clauses(conn, document_id, pages)
 
     # Postgres is committed at this point; a failure here (caught by run()'s
     # per-document handler below) leaves ingestion_state without a 'succeeded'
@@ -202,10 +225,34 @@ def _ingest_one(
         regulator=doc.regulator,
         document_type=doc.document_type,
         title=doc.title,
+        reference_number=reference_number,
         publication_date=publication_date,
         source_url=pdf_url,
         checksum=fetched.checksum,
         clauses=clauses,
+    )
+
+    # Only references that resolve to an already-ingested document produce a
+    # relationship; a reference to a document not yet ingested is dropped
+    # rather than retried later (ingestion_state marks this document
+    # 'succeeded' once, so it won't be re-scanned on a future run even after
+    # the target arrives - see the PR description for the reconciliation gap
+    # this leaves).
+    relationships: list[DocumentRelationship] = []
+    for extracted in extract_referenced_documents("\n".join(c.text for c in clauses)):
+        target_document_id = _resolve_reference_number(
+            conn, extracted.reference_number, document_id
+        )
+        if target_document_id is not None:
+            relationships.append(
+                DocumentRelationship(
+                    relationship_type=extracted.relationship_type,
+                    target_document_id=target_document_id,
+                    confidence=extracted.confidence,
+                )
+            )
+    write_document_relationships(
+        driver, source_document_id=document_id, relationships=relationships
     )
 
     _record_state(conn, document_id, "succeeded", fetched.checksum)
