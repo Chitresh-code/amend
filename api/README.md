@@ -13,6 +13,8 @@ uv run mypy app
 uv run pytest
 ```
 
+The test suite needs a Postgres, Redis, and Neo4j instance on the test ports referenced in `api/tests/conftest.py` (`localhost:55432`, `localhost:56379`, `bolt://localhost:57687`); `.github/workflows/ci.yml` shows the exact images and health checks CI uses for each.
+
 Run the full stack (this service plus Postgres, Neo4j, Redis) from the repository root: `docker compose up`.
 
 ## Ingestion

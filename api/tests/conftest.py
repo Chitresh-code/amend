@@ -6,8 +6,12 @@ os.environ.setdefault("POSTGRES_DB", "amend_test")
 os.environ.setdefault("POSTGRES_USER", "amend")
 os.environ.setdefault("POSTGRES_PASSWORD", "amend_test_pw")
 os.environ.setdefault("REDIS_URL", "redis://localhost:56379/0")
-os.environ.setdefault("NEO4J_USER", "test")
-os.environ.setdefault("NEO4J_PASSWORD", "test")
+os.environ.setdefault("NEO4J_URI", "bolt://localhost:57687")
+# Neo4j hard-requires the initial admin username to be exactly "neo4j" and the
+# password to be at least 8 characters (NEO4J_AUTH); anything else fails the
+# container's own bootstrap before it accepts any connection.
+os.environ.setdefault("NEO4J_USER", "neo4j")
+os.environ.setdefault("NEO4J_PASSWORD", "test-password")
 os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", "vv6HWttTtvs2bfSm_H_Gzh1ACRme1jRUr-wtUldclSs=")
 os.environ.setdefault("API_KEY_HASH_PEPPER", "test-api-key-pepper")
 os.environ.setdefault("SESSION_TOKEN_PEPPER", "test-session-pepper")
@@ -18,6 +22,7 @@ import redis as sync_redis
 from fastapi.testclient import TestClient
 
 from app.config import settings
+from app.graph.db import get_driver
 from app.main import app
 
 
@@ -27,14 +32,23 @@ def db_conn():
         yield conn
 
 
+@pytest.fixture
+def neo4j_driver():
+    driver = get_driver()
+    yield driver
+    driver.close()
+
+
 @pytest.fixture(autouse=True)
-def clean_state(db_conn):
+def clean_state(db_conn, neo4j_driver):
     db_conn.execute(
         "TRUNCATE TABLE conversations, model_credentials, api_keys, user_sessions, users, "
         "clause_embeddings_openai_text_embedding_3_large, embedding_models, clauses, "
         "ingestion_state, documents RESTART IDENTITY CASCADE"
     )
     sync_redis.from_url(settings.redis_url).flushdb()
+    with neo4j_driver.session() as session:
+        session.run("MATCH (n) DETACH DELETE n")
     yield
 
 
